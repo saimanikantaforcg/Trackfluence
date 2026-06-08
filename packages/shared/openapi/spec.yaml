@@ -1,0 +1,1777 @@
+openapi: 3.0.0
+info:
+  title: Trackfluence API
+  description: |
+    Revenue Attribution & Intelligence Platform for Creator-Led Growth.
+
+    ## Authentication
+
+    All endpoints (except those marked **Public**) require a JWT Bearer token:
+
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    Obtain a token via `POST /api/v1/auth/login`.
+
+    ## Rate Limiting
+
+    200 requests per 60 seconds per authenticated user.
+    Unauthenticated requests are rate-limited per IP.
+
+    Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+
+    ## Base URL
+
+    | Environment | URL |
+    |-------------|-----|
+    | Local dev   | `http://localhost:4000/api/v1` |
+    | Production  | `https://api.trackfluence.io/api/v1` |
+  version: "1.0.0"
+  contact:
+    name: Trackfluence Support
+    email: support@trackfluence.io
+  license:
+    name: UNLICENSED
+
+servers:
+  - url: http://localhost:4000/api/v1
+    description: Local development
+  - url: https://api.trackfluence.io/api/v1
+    description: Production
+
+tags:
+  - name: Auth
+    description: Authentication and user session management
+  - name: Creators
+    description: Creator profiles, portal, and CSV import
+  - name: Campaigns
+    description: Campaign CRUD and A/B variant links
+  - name: Attribution
+    description: Tracking links, click recording, and event ingestion
+  - name: Revenue Intelligence
+    description: KPIs, creator scores, cohorts, and forecasting
+  - name: Audiences
+    description: Rule-based segments and audience activation
+  - name: Payouts
+    description: Commission calculation and payout workflow
+  - name: Compliance
+    description: FTC disclosure detection
+  - name: Billing
+    description: Stripe subscription plans
+  - name: Organizations
+    description: Multi-tenancy, team invites, and domain settings
+  - name: Webhooks
+    description: Outbound webhook management
+  - name: API Keys
+    description: Programmatic access key management
+  - name: Admin
+    description: Platform administration (requires ADMIN role)
+  - name: Search
+    description: Global cross-entity search
+  - name: Reports
+    description: CSV exports
+  - name: Health
+    description: Service health check
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        error:
+          type: string
+
+    PaginatedMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    UserRole:
+      type: string
+      enum: [ADMIN, MEMBER, VIEWER]
+
+    OrgRole:
+      type: string
+      enum: [OWNER, ADMIN, MEMBER, VIEWER]
+
+    PlanTier:
+      type: string
+      enum: [FREE, STARTER, GROWTH, ENTERPRISE]
+
+    AttributionModel:
+      type: string
+      enum: [FIRST_TOUCH, LAST_TOUCH, LINEAR, TIME_DECAY]
+
+    PayoutStatus:
+      type: string
+      enum: [PENDING, APPROVED, PAID, CANCELLED]
+
+    TrackingLinkType:
+      type: string
+      enum: [STANDARD, PROMO_CODE, QR_CODE, REFERRAL]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        createdAt:
+          type: string
+          format: date-time
+
+    Creator:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        platform:
+          type: string
+          example: instagram
+        handle:
+          type: string
+        commissionRate:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          example: 10
+        createdAt:
+          type: string
+          format: date-time
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        budget:
+          type: number
+        currency:
+          type: string
+          example: USD
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    TrackingLink:
+      type: object
+      properties:
+        id:
+          type: string
+        shortCode:
+          type: string
+          example: aB3xYz12
+        destinationUrl:
+          type: string
+          format: uri
+        linkType:
+          $ref: '#/components/schemas/TrackingLinkType'
+        promoCode:
+          type: string
+          nullable: true
+        utmSource:
+          type: string
+          nullable: true
+        utmMedium:
+          type: string
+          nullable: true
+        utmCampaign:
+          type: string
+          nullable: true
+        totalClicks:
+          type: integer
+        creatorId:
+          type: string
+        campaignId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Attribution:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          $ref: '#/components/schemas/AttributionModel'
+        attributedRevenue:
+          type: number
+        attributionWeight:
+          type: number
+        orderId:
+          type: string
+        creatorId:
+          type: string
+        calculatedAt:
+          type: string
+          format: date-time
+
+    Payout:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          $ref: '#/components/schemas/PayoutStatus'
+        creatorId:
+          type: string
+        periodStart:
+          type: string
+          format: date-time
+        periodEnd:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatorScore:
+      type: object
+      properties:
+        creatorId:
+          type: string
+        creatorName:
+          type: string
+        score:
+          type: number
+          minimum: 0
+          maximum: 100
+        tier:
+          type: string
+          enum: [Platinum, Gold, Silver, Bronze]
+        totalRevenue:
+          type: number
+        totalConversions:
+          type: integer
+        totalClicks:
+          type: integer
+
+    DashboardKPIs:
+      type: object
+      properties:
+        totalRevenue:
+          type: number
+        attributedRevenue:
+          type: number
+        attributionRate:
+          type: number
+        avgOrderValue:
+          type: number
+        creatorAcquiredCustomers:
+          type: integer
+        clickToAttributionRate:
+          type: number
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ─── AUTH ───────────────────────────────────────────────────────────────────
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                name:
+                  type: string
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already registered
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Send password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Reset email sent (always returns 200 to prevent enumeration)
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using token from email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Password reset successful
+        '400':
+          description: Invalid or expired token
+
+  # ─── CREATORS ───────────────────────────────────────────────────────────────
+
+  /creators:
+    get:
+      tags: [Creators]
+      summary: List all creators
+      responses:
+        '200':
+          description: List of creators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Creator'
+    post:
+      tags: [Creators]
+      summary: Create a new creator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, platform, commissionRate]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                platform:
+                  type: string
+                  example: instagram
+                handle:
+                  type: string
+                commissionRate:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '201':
+          description: Creator created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creator'
+
+  /creators/import:
+    post:
+      tags: [Creators]
+      summary: Bulk import creators from CSV
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csv]
+              properties:
+                csv:
+                  type: string
+                  description: CSV string with columns name,email,platform,handle,commissionRate
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
+                  updated:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: string
+
+  /creators/portal:
+    get:
+      tags: [Creators]
+      summary: Get creator portal data (token-based, no login)
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Creator portal data
+        '401':
+          description: Invalid or expired token
+
+  /creators/{id}:
+    get:
+      tags: [Creators]
+      summary: Get creator by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Creator details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creator'
+        '404':
+          description: Creator not found
+
+  /creators/{id}/commission:
+    patch:
+      tags: [Creators]
+      summary: Update creator commission rate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [commissionRate]
+              properties:
+                commissionRate:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '200':
+          description: Updated creator
+
+  # ─── CAMPAIGNS ──────────────────────────────────────────────────────────────
+
+  /campaigns:
+    get:
+      tags: [Campaigns]
+      summary: List campaigns
+      responses:
+        '200':
+          description: Campaigns list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Campaign'
+    post:
+      tags: [Campaigns]
+      summary: Create a campaign (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, budget, currency]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                budget:
+                  type: number
+                currency:
+                  type: string
+                  example: USD
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+                creatorIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}:
+    get:
+      tags: [Campaigns]
+      summary: Get campaign details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+    patch:
+      tags: [Campaigns]
+      summary: Update campaign (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                budget:
+                  type: number
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Updated campaign
+    delete:
+      tags: [Campaigns]
+      summary: Delete campaign (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /campaigns/{id}/stats:
+    get:
+      tags: [Campaigns]
+      summary: Get campaign ROI stats
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalClicks:
+                    type: integer
+                  totalAttributedRevenue:
+                    type: number
+                  roas:
+                    type: number
+                  creatorCount:
+                    type: integer
+
+  /campaigns/{id}/variants:
+    post:
+      tags: [Campaigns]
+      summary: Create A/B variant tracking link (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parentLinkId, variantLabel]
+              properties:
+                parentLinkId:
+                  type: string
+                variantLabel:
+                  type: string
+                destinationUrl:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Variant link created
+
+  # ─── ATTRIBUTION ────────────────────────────────────────────────────────────
+
+  /attribution/tracking-links:
+    get:
+      tags: [Attribution]
+      summary: List tracking links
+      responses:
+        '200':
+          description: Tracking links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrackingLink'
+    post:
+      tags: [Attribution]
+      summary: Create a tracking link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creatorId, destinationUrl]
+              properties:
+                creatorId:
+                  type: string
+                campaignId:
+                  type: string
+                destinationUrl:
+                  type: string
+                  format: uri
+                linkType:
+                  $ref: '#/components/schemas/TrackingLinkType'
+                promoCode:
+                  type: string
+                utmSource:
+                  type: string
+                utmMedium:
+                  type: string
+                utmCampaign:
+                  type: string
+                utmContent:
+                  type: string
+                utmTerm:
+                  type: string
+      responses:
+        '201':
+          description: Tracking link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackingLink'
+
+  /attribution/r/{shortCode}:
+    get:
+      tags: [Attribution]
+      summary: Click redirect — records click and redirects to destination URL
+      security: []
+      parameters:
+        - name: shortCode
+          in: path
+          required: true
+          schema:
+            type: string
+            example: aB3xYz12
+      responses:
+        '302':
+          description: Redirect to destination URL
+        '404':
+          description: Short code not found
+
+  /attribution/server-events:
+    post:
+      tags: [Attribution]
+      summary: Ingest server-side revenue event (Meta CAPI compatible)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventName, eventTime, userData]
+              properties:
+                eventId:
+                  type: string
+                eventName:
+                  type: string
+                  example: Purchase
+                eventTime:
+                  type: integer
+                  description: Unix timestamp
+                actionSource:
+                  type: string
+                  example: website
+                sourceUrl:
+                  type: string
+                  format: uri
+                userData:
+                  type: object
+                  properties:
+                    em:
+                      type: string
+                      description: SHA-256 hashed email
+                    ph:
+                      type: string
+                      description: SHA-256 hashed phone
+                    client_ip_address:
+                      type: string
+                    client_user_agent:
+                      type: string
+                    fbp:
+                      type: string
+                    fbc:
+                      type: string
+                customData:
+                  type: object
+                  properties:
+                    value:
+                      type: number
+                    currency:
+                      type: string
+                    order_id:
+                      type: string
+      responses:
+        '200':
+          description: Event received
+
+  # ─── REVENUE INTELLIGENCE ───────────────────────────────────────────────────
+
+  /revenue-intelligence/dashboard:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Get dashboard KPI metrics
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: KPI metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKPIs'
+
+  /revenue-intelligence/creators/scores:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Get creator scores and tiers
+      responses:
+        '200':
+          description: Creator scores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CreatorScore'
+
+  /revenue-intelligence/forecast:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Get revenue forecast
+      parameters:
+        - name: months
+          in: query
+          schema:
+            type: integer
+            default: 3
+      responses:
+        '200':
+          description: Forecast data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  historical:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        month:
+                          type: string
+                        revenue:
+                          type: number
+                  forecast:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        month:
+                          type: string
+                        projected:
+                          type: number
+
+  /revenue-intelligence/roas:
+    get:
+      tags: [Revenue Intelligence]
+      summary: ROAS by creator
+      responses:
+        '200':
+          description: ROAS leaderboard
+
+  /revenue-intelligence/cohorts:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Cohort analysis for creator-acquired customers
+      responses:
+        '200':
+          description: Cohort data
+
+  /revenue-intelligence/timeseries:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Monthly revenue time series
+      responses:
+        '200':
+          description: Time series data
+
+  /revenue-intelligence/currency-breakdown:
+    get:
+      tags: [Revenue Intelligence]
+      summary: Revenue breakdown by currency
+      responses:
+        '200':
+          description: Currency breakdown
+
+  # ─── AUDIENCES ──────────────────────────────────────────────────────────────
+
+  /audiences:
+    get:
+      tags: [Audiences]
+      summary: List audience segments
+      responses:
+        '200':
+          description: Audiences list
+    post:
+      tags: [Audiences]
+      summary: Create an audience segment (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, rules]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                rules:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      field:
+                        type: string
+                        enum: [creatorAcquired, totalRevenue, orderCount, creatorId, channel]
+                      operator:
+                        type: string
+                        enum: [eq, neq, gt, lt, gte, lte]
+                      value:
+                        oneOf:
+                          - type: string
+                          - type: number
+                          - type: boolean
+      responses:
+        '201':
+          description: Audience created
+
+  /audiences/{id}/compute:
+    post:
+      tags: [Audiences]
+      summary: Re-compute audience membership (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Computation triggered
+
+  /audiences/{id}/export:
+    post:
+      tags: [Audiences]
+      summary: Export audience to external destination (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination]
+              properties:
+                destination:
+                  type: string
+                  enum: [salesforce, salesforce_data_cloud, sfmc, shopify]
+      responses:
+        '200':
+          description: Export initiated
+
+  /audiences/{id}/csv:
+    get:
+      tags: [Audiences]
+      summary: Download audience as CSV (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  # ─── PAYOUTS ────────────────────────────────────────────────────────────────
+
+  /payouts:
+    get:
+      tags: [Payouts]
+      summary: List payouts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PayoutStatus'
+        - name: creatorId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payouts list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payout'
+    post:
+      tags: [Payouts]
+      summary: Create a payout record (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creatorId, amount, currency, periodStart, periodEnd]
+              properties:
+                creatorId:
+                  type: string
+                amount:
+                  type: number
+                currency:
+                  type: string
+                periodStart:
+                  type: string
+                  format: date-time
+                periodEnd:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Payout created
+
+  /payouts/calculate:
+    get:
+      tags: [Payouts]
+      summary: Estimate payout for a creator in a period
+      parameters:
+        - name: creatorId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: periodStart
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: periodEnd
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Payout estimate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalAttributed:
+                    type: number
+                  commissionRate:
+                    type: number
+                  estimatedPayout:
+                    type: number
+                  currency:
+                    type: string
+
+  /payouts/bulk-approve:
+    post:
+      tags: [Payouts]
+      summary: Bulk approve multiple payouts (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Approved count
+
+  /payouts/export/csv:
+    get:
+      tags: [Payouts]
+      summary: Export payouts as CSV (Admin)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PayoutStatus'
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /payouts/{id}/approve:
+    post:
+      tags: [Payouts]
+      summary: Approve a payout (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Approved payout
+
+  /payouts/{id}/pay:
+    post:
+      tags: [Payouts]
+      summary: Mark payout as paid (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paid payout
+
+  /payouts/{id}/cancel:
+    post:
+      tags: [Payouts]
+      summary: Cancel a payout (Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancelled payout
+
+  # ─── COMPLIANCE ─────────────────────────────────────────────────────────────
+
+  /compliance/check:
+    post:
+      tags: [Compliance]
+      summary: Run FTC compliance check on content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creatorId, contentText, contentUrl]
+              properties:
+                creatorId:
+                  type: string
+                contentText:
+                  type: string
+                contentUrl:
+                  type: string
+                  format: uri
+                contentType:
+                  type: string
+                  enum: [POST, STORY, VIDEO, BLOG]
+      responses:
+        '200':
+          description: Compliance check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isCompliant:
+                    type: boolean
+                  hasDisclosure:
+                    type: boolean
+                  disclosureType:
+                    type: string
+                    enum: [hashtag, text]
+                    nullable: true
+                  issues:
+                    type: array
+                    items:
+                      type: string
+
+  /compliance/summary:
+    get:
+      tags: [Compliance]
+      summary: Get overall compliance summary
+      responses:
+        '200':
+          description: Summary stats
+
+  # ─── BILLING ────────────────────────────────────────────────────────────────
+
+  /billing/plans:
+    get:
+      tags: [Billing]
+      summary: List available subscription plans
+      security: []
+      responses:
+        '200':
+          description: Plans with limits and pricing
+
+  /billing/subscription:
+    get:
+      tags: [Billing]
+      summary: Get current subscription
+      responses:
+        '200':
+          description: Current subscription details
+
+  /billing/checkout:
+    post:
+      tags: [Billing]
+      summary: Create Stripe checkout session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  $ref: '#/components/schemas/PlanTier'
+      responses:
+        '200':
+          description: Checkout URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+
+  /billing/portal:
+    post:
+      tags: [Billing]
+      summary: Create Stripe billing portal session
+      responses:
+        '200':
+          description: Portal URL
+
+  /billing/webhook:
+    post:
+      tags: [Billing]
+      summary: Stripe webhook receiver (raw body, HMAC verified)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Acknowledged
+
+  # ─── ORGANIZATIONS ──────────────────────────────────────────────────────────
+
+  /organizations:
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Organization created
+
+  /organizations/mine:
+    get:
+      tags: [Organizations]
+      summary: List organizations the current user belongs to
+      responses:
+        '200':
+          description: Organizations
+
+  /organizations/{id}/invite:
+    post:
+      tags: [Organizations]
+      summary: Invite a user to the organization (Owner/Admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  $ref: '#/components/schemas/OrgRole'
+      responses:
+        '200':
+          description: Invite sent
+
+  /organizations/accept-invite/{token}:
+    post:
+      tags: [Organizations]
+      summary: Accept an organization invite
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Joined organization
+
+  # ─── WEBHOOKS ───────────────────────────────────────────────────────────────
+
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List outbound webhooks
+      responses:
+        '200':
+          description: Webhooks list
+    post:
+      tags: [Webhooks]
+      summary: Create an outbound webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+                  description: Leave empty to subscribe to all events
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Webhook created (secret shown once)
+
+  /webhooks/{id}/toggle:
+    post:
+      tags: [Webhooks]
+      summary: Toggle webhook active/disabled
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated webhook
+
+  /webhooks/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: Get webhook delivery history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Delivery history
+
+  # ─── API KEYS ────────────────────────────────────────────────────────────────
+
+  /api-keys:
+    get:
+      tags: [API Keys]
+      summary: List API keys
+      responses:
+        '200':
+          description: Keys (plain key not returned after creation)
+    post:
+      tags: [API Keys]
+      summary: Generate a new API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                    enum: [read, write]
+      responses:
+        '201':
+          description: API key created (plain key shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    description: Full API key — shown once, not stored
+                  id:
+                    type: string
+
+  /api-keys/{id}/revoke:
+    post:
+      tags: [API Keys]
+      summary: Revoke an API key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Revoked
+
+  # ─── ADMIN ───────────────────────────────────────────────────────────────────
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List all platform users (ADMIN)
+      responses:
+        '200':
+          description: Users list
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Get platform-wide system statistics (ADMIN)
+      responses:
+        '200':
+          description: System stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: integer
+                  creators:
+                    type: integer
+                  customers:
+                    type: integer
+                  orders:
+                    type: integer
+                  attributions:
+                    type: integer
+
+  /admin/cache/flush:
+    post:
+      tags: [Admin]
+      summary: Flush Redis cache (ADMIN)
+      responses:
+        '200':
+          description: Cache cleared
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: View admin audit log (ADMIN)
+      responses:
+        '200':
+          description: Audit log entries
+
+  /admin/users/{id}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend a user (ADMIN, cannot self-suspend)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User suspended
+        '403':
+          description: Cannot suspend yourself
+
+  /admin/users/{id}/promote:
+    post:
+      tags: [Admin]
+      summary: Change user role (ADMIN, cannot self-change)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/UserRole'
+      responses:
+        '200':
+          description: Role updated
+        '403':
+          description: Cannot change your own role
+
+  /admin/users/{id}:
+    delete:
+      tags: [Admin]
+      summary: Hard delete a user (ADMIN, cannot self-delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User deleted
+        '403':
+          description: Cannot delete yourself
+
+  # ─── SEARCH ──────────────────────────────────────────────────────────────────
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Global cross-entity search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 5
+            maximum: 20
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  creators:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Creator'
+                  customers:
+                    type: array
+                    items:
+                      type: object
+                  trackingLinks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TrackingLink'
+
+  # ─── REPORTS ─────────────────────────────────────────────────────────────────
+
+  /reports/export-csv:
+    get:
+      tags: [Reports]
+      summary: Export attribution report as CSV
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  # ─── HEALTH ──────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: All systems healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  info:
+                    type: object
+                    properties:
+                      database:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: up
+        '503':
+          description: Service degraded

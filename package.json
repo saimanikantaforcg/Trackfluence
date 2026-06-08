@@ -1,0 +1,27 @@
+{
+  "name": "trackfluence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Revenue Attribution and Intelligence Infrastructure for Creator-Led Growth",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:generate": "turbo db:generate",
+    "db:push": "turbo db:push",
+    "db:migrate": "turbo db:migrate",
+    "db:seed": "pnpm --filter @trackfluence/database db:seed",
+    "sdk:generate": "pnpm --filter @trackfluence/api sdk:generate && pnpm --filter @trackfluence/web sdk:types",
+    "clean": "turbo clean"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "wait-on": "8.0.3"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

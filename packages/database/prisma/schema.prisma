@@ -1,0 +1,658 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Platform Users ───────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(MEMBER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── Creators ────────────────────────────────────────────────
+
+model Creator {
+  id             String          @id @default(cuid())
+  externalId     String?         @unique
+  name           String
+  email          String?         @unique
+  platform       String?
+  handle         String?
+  avatarUrl      String?
+  metadata       Json?
+  organizationId String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  commissionRate   Decimal?          @db.Decimal(5, 4)   // e.g. 0.1000 = 10%
+  trackingLinks    TrackingLink[]
+  touchpoints      TouchPoint[]
+  attributions     Attribution[]
+  complianceChecks FTCComplianceCheck[]
+  payouts          Payout[]
+
+  @@index([email])
+  @@index([handle])
+  @@index([organizationId])
+}
+
+// ─── Attribution Infrastructure ──────────────────────────────
+
+model TrackingLink {
+  id             String          @id @default(cuid())
+  shortCode      String          @unique
+  creatorId      String
+  campaignId     String?
+  destinationUrl String
+  type           TrackingLinkType @default(STANDARD)
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  utmContent     String?
+  utmTerm        String?
+  promoCode      String?         @unique
+  clickCount     Int             @default(0)
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  creator        Creator         @relation(fields: [creatorId], references: [id])
+  touchpoints    TouchPoint[]
+  events         Event[]
+
+  @@index([shortCode])
+  @@index([promoCode])
+  @@index([creatorId])
+  @@index([campaignId])
+}
+
+enum TrackingLinkType {
+  STANDARD
+  PROMO_CODE
+  QR_CODE
+  REFERRAL
+}
+
+// ─── Events ──────────────────────────────────────────────────
+
+model Event {
+  id             String          @id @default(cuid())
+  eventName      String
+  category       EventCategory
+  timestamp      DateTime
+  sessionId      String
+  customerId     String?
+  creatorId      String?
+  trackingLinkId String?
+  properties     Json?
+  context        Json?
+  processed      Boolean         @default(false)
+  deduplicationKey String?       @unique
+  createdAt      DateTime        @default(now())
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  trackingLink   TrackingLink?   @relation(fields: [trackingLinkId], references: [id])
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@index([eventName])
+  @@index([timestamp])
+  @@index([category])
+}
+
+enum EventCategory {
+  PAGE_VIEW
+  LINK_CLICK
+  ADD_TO_CART
+  INITIATE_CHECKOUT
+  PURCHASE
+  SIGN_UP
+  LEAD
+  CUSTOM
+}
+
+// ─── Identity Resolution ─────────────────────────────────────
+
+model Customer {
+  id                  String              @id @default(cuid())
+  externalId          String?             @unique
+  email               String?             @unique
+  phone               String?
+  firstName           String?
+  lastName            String?
+  creatorAcquired     Boolean             @default(false)
+  acquisitionCreatorId String?
+  totalRevenue        Decimal             @default(0) @db.Decimal(12, 2)
+  orderCount          Int                 @default(0)
+  ltv                 Decimal             @default(0) @db.Decimal(12, 2)
+  firstSeenAt         DateTime            @default(now())
+  lastSeenAt          DateTime            @default(now())
+  metadata            Json?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  identities          CustomerIdentity[]
+  events              Event[]
+  touchpoints         TouchPoint[]
+  orders              Order[]
+  attributions        Attribution[]
+  audienceMembers     AudienceMember[]
+  consentRecord       ConsentRecord?
+
+  @@index([email])
+  @@index([externalId])
+  @@index([creatorAcquired])
+}
+
+model CustomerIdentity {
+  id             String        @id @default(cuid())
+  customerId     String
+  identityType   IdentityType
+  identityValue  String
+  confidence     Float         @default(1.0)
+  firstSeen      DateTime      @default(now())
+  lastSeen       DateTime      @default(now())
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([identityType, identityValue])
+  @@index([customerId])
+}
+
+enum IdentityType {
+  EMAIL
+  PHONE
+  CRM_ID
+  DEVICE_ID
+  SESSION_ID
+  SHOPIFY_ID
+  FBP
+  FBC
+}
+
+model ConsentRecord {
+  id               String        @id @default(cuid())
+  customerId       String        @unique
+  gdprConsent      ConsentStatus @default(PENDING)
+  ccpaOptOut       Boolean       @default(false)
+  consentTimestamp  DateTime      @default(now())
+  customer         Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+enum ConsentStatus {
+  GRANTED
+  DENIED
+  PENDING
+}
+
+// ─── Touchpoints & Attribution ───────────────────────────────
+
+model TouchPoint {
+  id              String          @id @default(cuid())
+  customerId      String
+  creatorId       String
+  trackingLinkId  String?
+  channel         String
+  interactionType InteractionType
+  timestamp       DateTime
+  metadata        Json?
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  creator         Creator         @relation(fields: [creatorId], references: [id])
+  trackingLink    TrackingLink?   @relation(fields: [trackingLinkId], references: [id])
+  attributions    Attribution[]
+
+  @@index([customerId])
+  @@index([creatorId])
+  @@index([timestamp])
+}
+
+enum InteractionType {
+  CLICK
+  VIEW
+  PROMO_CODE
+  REFERRAL
+}
+
+model Attribution {
+  id                String           @id @default(cuid())
+  orderId           String
+  customerId        String
+  creatorId         String
+  touchpointId      String
+  model             AttributionModel
+  attributedRevenue Decimal          @db.Decimal(12, 2)
+  attributionWeight Float
+  calculatedAt      DateTime         @default(now())
+  order             Order            @relation(fields: [orderId], references: [id])
+  customer          Customer         @relation(fields: [customerId], references: [id])
+  creator           Creator          @relation(fields: [creatorId], references: [id])
+  touchpoint        TouchPoint       @relation(fields: [touchpointId], references: [id])
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([creatorId])
+  @@index([model])
+}
+
+enum AttributionModel {
+  FIRST_TOUCH
+  LAST_TOUCH
+  LINEAR
+  TIME_DECAY
+}
+
+// ─── Orders / Revenue ────────────────────────────────────────
+
+model Order {
+  id           String        @id @default(cuid())
+  externalId   String        @unique
+  customerId   String
+  totalAmount  Decimal       @db.Decimal(12, 2)
+  currency     String        @default("USD")
+  status       OrderStatus   @default(COMPLETED)
+  source       String?
+  orderDate    DateTime
+  metadata     Json?
+  createdAt    DateTime      @default(now())
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  attributions Attribution[]
+
+  @@index([customerId])
+  @@index([orderDate])
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+  CANCELLED
+}
+
+// ─── Audience Activation ─────────────────────────────────────
+
+model Audience {
+  id             String           @id @default(cuid())
+  name           String
+  description    String?
+  rules          Json
+  customerCount  Int              @default(0)
+  organizationId String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  members        AudienceMember[]
+  exports        AudienceExport[]
+}
+
+model AudienceMember {
+  id         String   @id @default(cuid())
+  audienceId String
+  customerId String
+  addedAt    DateTime @default(now())
+  audience   Audience @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([audienceId, customerId])
+}
+
+model AudienceExport {
+  id            String       @id @default(cuid())
+  audienceId    String
+  destination   String
+  status        ExportStatus @default(PENDING)
+  exportedCount Int          @default(0)
+  startedAt     DateTime     @default(now())
+  completedAt   DateTime?
+  errorMessage  String?
+  audience      Audience     @relation(fields: [audienceId], references: [id])
+
+  @@index([audienceId])
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ─── Compliance ──────────────────────────────────────────────
+
+model FTCComplianceCheck {
+  id              String         @id @default(cuid())
+  creatorId       String
+  contentUrl      String
+  contentType     ContentType
+  hasDisclosure   Boolean
+  disclosureType  String?
+  isCompliant     Boolean
+  issues          Json?
+  checkedAt       DateTime       @default(now())
+  creator         Creator        @relation(fields: [creatorId], references: [id])
+
+  @@index([creatorId])
+  @@index([isCompliant])
+}
+
+enum ContentType {
+  POST
+  STORY
+  VIDEO
+  BLOG
+}
+
+// ─── Connector Sync State ────────────────────────────────────
+
+model ConnectorSync {
+  id            String       @id @default(cuid())
+  connectorType String
+  direction     String
+  status        ExportStatus @default(PENDING)
+  recordsCount  Int          @default(0)
+  startedAt     DateTime     @default(now())
+  completedAt   DateTime?
+  errorMessage  String?
+  metadata      Json?
+
+  @@index([connectorType])
+}
+
+// ─── OAuth Tokens (Salesforce, etc.) ─────────────────────────
+
+model OAuthToken {
+  id           String    @id @default(cuid())
+  provider     String    // e.g. "salesforce"
+  instanceUrl  String    // Salesforce instance URL
+  accessToken  String    // encrypted at rest via app layer
+  refreshToken String    // encrypted at rest via app layer
+  expiresAt    DateTime?
+  scope        String?
+  issuedAt     DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([provider])
+  @@index([provider])
+}
+
+// ─── Campaigns ───────────────────────────────────────────────
+
+model Campaign {
+  id             String    @id @default(cuid())
+  name           String
+  description    String?
+  startDate      DateTime
+  endDate        DateTime?
+  budget         Decimal?  @db.Decimal(12, 2)
+  currency       String    @default("USD")
+  status         String    @default("active")  // active | paused | completed
+  creatorIds     String[]  @default([])
+  metadata       Json?
+  organizationId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  payouts        Payout[]
+
+  @@index([status])
+  @@index([organizationId])
+}
+
+// ─── Payouts ─────────────────────────────────────────────────
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+model Payout {
+  id          String       @id @default(cuid())
+  creatorId   String
+  creator     Creator      @relation(fields: [creatorId], references: [id])
+  campaignId  String?
+  campaign    Campaign?    @relation(fields: [campaignId], references: [id])
+  amount      Decimal      @db.Decimal(12, 2)
+  currency    String       @default("USD")
+  status      PayoutStatus @default(PENDING)
+  periodStart DateTime
+  periodEnd   DateTime
+  approvedBy  String?      // userId
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([creatorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── Audit Log ────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String              // e.g. "user.role_updated", "creator.created"
+  entityType String?             // e.g. "User", "Creator"
+  entityId   String?
+  details    Json?               // before/after or extra context
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ─── API Keys ─────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String    @unique   // SHA-256 of the actual key
+  keyPrefix   String              // first 8 chars shown to user
+  scopes      String[]  @default(["read"])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+// ─── In-App Notifications ────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String                        // recipient
+  type      String                        // e.g. "payout.approved", "campaign.ended"
+  title     String
+  body      String
+  link      String?                       // optional deep-link path e.g. "/payouts"
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+// ─── Creator Invites ─────────────────────────────────────────
+
+model CreatorInvite {
+  id          String    @id @default(cuid())
+  creatorId   String    @unique
+  invitedBy   String                     // userId of sender
+  token       String    @unique          // secure random token
+  email       String
+  acceptedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([token])
+}
+
+// ─── Billing / Subscriptions ─────────────────────────────────
+
+enum PlanTier {
+  FREE
+  STARTER
+  GROWTH
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  stripeCustomerId     String             @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  plan                 PlanTier           @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([stripeCustomerId])
+}
+
+model UsageRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  metric         String                  // e.g. "tracking_link_click", "attribution_run"
+  quantity       Int      @default(1)
+  recordedAt     DateTime @default(now())
+
+  @@index([userId, metric])
+  @@index([recordedAt])
+}
+
+// ─── Outbound Webhooks ───────────────────────────────────────
+
+enum WebhookStatus {
+  ACTIVE
+  DISABLED
+}
+
+model Webhook {
+  id             String         @id @default(cuid())
+  url            String
+  secret         String                         // HMAC-SHA256 signing secret
+  events         String[]       @default([])    // e.g. ["payout.approved","payout.paid"]
+  status         WebhookStatus  @default(ACTIVE)
+  description    String?
+  organizationId String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deliveries     WebhookDelivery[]
+
+  @@index([status])
+}
+
+model WebhookDelivery {
+  id          String    @id @default(cuid())
+  webhookId   String
+  webhook     Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event       String
+  payload     Json
+  responseStatus Int?
+  responseBody   String?
+  success     Boolean   @default(false)
+  attemptedAt DateTime  @default(now())
+
+  @@index([webhookId])
+  @@index([event])
+  @@index([success])
+}
+
+// ─── Multi-tenancy: Organizations ────────────────────────────
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model Organization {
+  id               String               @id @default(cuid())
+  name             String
+  slug             String               @unique
+  trackingDomain   String?              // custom white-label domain e.g. links.brand.com
+  slackWebhookUrl  String?              // Slack incoming webhook URL
+  discordWebhookUrl String?             // Discord webhook URL
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  members          OrganizationMember[]
+  invites          OrganizationInvite[]
+
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrgRole      @default(MEMBER)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model OrganizationInvite {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  role           OrgRole      @default(MEMBER)
+  invitedBy      String                       // userId
+  token          String       @unique
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([token])
+}
+
+// ─── Password Reset ───────────────────────────────────────────
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique          // SHA-256 of raw token
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

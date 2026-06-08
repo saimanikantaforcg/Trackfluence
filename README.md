@@ -239,6 +239,12 @@ pnpm dev
 
 ### Creator Scoring
 
+---
+
+## Resuming development
+
+If you cloned the repo or downloaded the ZIP, follow the step-by-step guide: [SETUP.md](./SETUP.md). It includes prerequisites, env variables, Docker commands, Prisma init/push, and how to start the dev servers.
+
 Every creator gets a **0–100 score** updated in real-time:
 
 ```

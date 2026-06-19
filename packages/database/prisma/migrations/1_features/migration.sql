@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS "StripeConnectAccount" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "stripeAccountId" TEXT NOT NULL,
+    "organizationId" TEXT,
     "email" TEXT,
     "country" TEXT,
     "detailsSubmitted" BOOLEAN NOT NULL DEFAULT false,
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS "StripeConnectAccount" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "StripeConnectAccount_userId_key" ON "StripeConnectAccount"("userId");
 CREATE UNIQUE INDEX IF NOT EXISTS "StripeConnectAccount_stripeAccountId_key" ON "StripeConnectAccount"("stripeAccountId");
+CREATE INDEX IF NOT EXISTS "StripeConnectAccount_organizationId_idx" ON "StripeConnectAccount"("organizationId");
 
 -- AI Recommendations: Cache for generated insights
 CREATE TABLE IF NOT EXISTS "AiRecommendation" (
@@ -69,4 +71,5 @@ CREATE INDEX IF NOT EXISTS "AiRecommendation_expiresAt_idx" ON "AiRecommendation
 ALTER TABLE "MfaSecret" ADD CONSTRAINT "MfaSecret_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "MfaBackupCode" ADD CONSTRAINT "MfaBackupCode_secretId_fkey" FOREIGN KEY ("secretId") REFERENCES "MfaSecret"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "StripeConnectAccount" ADD CONSTRAINT "StripeConnectAccount_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "StripeConnectAccount" ADD CONSTRAINT "StripeConnectAccount_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "AiRecommendation" ADD CONSTRAINT "AiRecommendation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

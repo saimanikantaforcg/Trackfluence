@@ -677,21 +677,24 @@ model MfaBackupCode {
 // ─── Stripe Connect (Payout Disbursement) ─────────────────────
 
 model StripeConnectAccount {
-  id                 String    @id @default(cuid())
-  userId             String    @unique
-  stripeAccountId    String    @unique
+  id                 String       @id @default(cuid())
+  userId             String       @unique
+  stripeAccountId    String       @unique
+  organizationId     String?
   email              String?
   country            String?
-  detailsSubmitted   Boolean   @default(false)
-  chargesEnabled     Boolean   @default(false)
-  payoutsEnabled     Boolean   @default(false)
-  onboardingComplete Boolean   @default(false)
+  detailsSubmitted   Boolean      @default(false)
+  chargesEnabled     Boolean      @default(false)
+  payoutsEnabled     Boolean      @default(false)
+  onboardingComplete Boolean      @default(false)
   metadata           Json?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([stripeAccountId])
+  @@index([organizationId])
 }
 
 // ─── AI Recommendations ───────────────────────────────────────

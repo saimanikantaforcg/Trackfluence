@@ -3,6 +3,7 @@ import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { AppShell } from '@/components/layout/app-shell';
 import { PostHogProvider } from '@/lib/posthog-provider';
+import { PwaRegister } from '@/components/pwa-register';
 
 export const metadata: Metadata = {
   title: 'Trackfluence — Revenue Attribution Intelligence',
@@ -35,6 +36,7 @@ export default function RootLayout({
             <AppShell>{children}</AppShell>
           </AuthProvider>
         </PostHogProvider>
+        <PwaRegister />
       </body>
     </html>
   );

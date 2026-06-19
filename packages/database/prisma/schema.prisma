@@ -10,13 +10,15 @@ datasource db {
 // ─── Platform Users ───────────────────────────────────────────
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         UserRole @default(MEMBER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  email                  String   @unique
+  passwordHash           String
+  name                   String
+  role                   UserRole @default(MEMBER)
+  currentOrganizationId  String?
+  mfaEnabled             Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   @@index([email])
 }
@@ -294,6 +296,8 @@ model Audience {
   updatedAt      DateTime         @updatedAt
   members        AudienceMember[]
   exports        AudienceExport[]
+
+  @@index([organizationId])
 }
 
 model AudienceMember {
@@ -612,6 +616,7 @@ model Organization {
   updatedAt        DateTime             @updatedAt
   members          OrganizationMember[]
   invites          OrganizationInvite[]
+  stripeConnectAccounts StripeConnectAccount[]
 
   @@index([slug])
 }
@@ -642,6 +647,68 @@ model OrganizationInvite {
 
   @@unique([organizationId, email])
   @@index([token])
+}
+
+// ─── MFA (Multi-Factor Authentication) ────────────────────────
+
+model MfaSecret {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  secret    String   // TOTP secret (encrypted)
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  backupCodes MfaBackupCode[]
+
+  @@index([userId])
+}
+
+model MfaBackupCode {
+  id        String   @id @default(cuid())
+  secretId  String
+  codeHash  String   // SHA-256 of backup code
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  secret    MfaSecret @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@index([secretId])
+}
+
+// ─── Stripe Connect (Payout Disbursement) ─────────────────────
+
+model StripeConnectAccount {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  stripeAccountId    String    @unique
+  email              String?
+  country            String?
+  detailsSubmitted   Boolean   @default(false)
+  chargesEnabled     Boolean   @default(false)
+  payoutsEnabled     Boolean   @default(false)
+  onboardingComplete Boolean   @default(false)
+  metadata           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([stripeAccountId])
+}
+
+// ─── AI Recommendations ───────────────────────────────────────
+
+model AiRecommendation {
+  id             String   @id @default(cuid())
+  userId         String
+  type           String   // e.g. "commission_rate", "creator_match", "content_suggestion"
+  context        Json     // input data used to generate
+  recommendation Json     // AI-generated recommendation
+  confidence     Float?   // 0-1 confidence score
+  model          String   @default("gpt-4") // which AI model generated this
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime? // cache expiry
+
+  @@index([userId, type])
+  @@index([expiresAt])
 }
 
 // ─── Password Reset ───────────────────────────────────────────

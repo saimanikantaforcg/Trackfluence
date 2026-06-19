@@ -1,19 +1,26 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { WebhooksService } from '../webhooks/webhooks.service';
+import { Injectable, NotFoundException, Logger } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { PrismaService } from "../prisma/prisma.service";
+import { WebhooksService } from "../webhooks/webhooks.service";
+import { ATTRIBUTION_QUEUE } from "../queue/queue.module";
 
-export type AttributionModelType = 'FIRST_TOUCH' | 'LAST_TOUCH' | 'LINEAR' | 'TIME_DECAY';
+export type AttributionModelType =
+  | "FIRST_TOUCH"
+  | "LAST_TOUCH"
+  | "LINEAR"
+  | "TIME_DECAY";
 
 export const VALID_ATTRIBUTION_MODELS: AttributionModelType[] = [
-  'FIRST_TOUCH',
-  'LAST_TOUCH',
-  'LINEAR',
-  'TIME_DECAY',
+  "FIRST_TOUCH",
+  "LAST_TOUCH",
+  "LINEAR",
+  "TIME_DECAY",
 ];
 
 export function resolveModel(raw?: string): AttributionModelType {
-  const upper = (raw ?? '').toUpperCase() as AttributionModelType;
-  return VALID_ATTRIBUTION_MODELS.includes(upper) ? upper : 'FIRST_TOUCH';
+  const upper = (raw ?? "").toUpperCase() as AttributionModelType;
+  return VALID_ATTRIBUTION_MODELS.includes(upper) ? upper : "FIRST_TOUCH";
 }
 
 @Injectable()
@@ -23,6 +30,7 @@ export class RevenueAttributionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhooks: WebhooksService,
+    @InjectQueue(ATTRIBUTION_QUEUE) private readonly attributionQueue: Queue,
   ) {}
 
   async calculateAttribution(orderId: string, rawModel?: string) {
@@ -33,7 +41,7 @@ export class RevenueAttributionService {
         customer: {
           include: {
             touchpoints: {
-              orderBy: { timestamp: 'asc' },
+              orderBy: { timestamp: "asc" },
               include: { creator: true },
             },
           },
@@ -41,18 +49,23 @@ export class RevenueAttributionService {
       },
     });
 
-    if (!order) throw new NotFoundException('Order not found');
+    if (!order) throw new NotFoundException("Order not found");
 
     const touchpoints = order.customer.touchpoints;
     if (touchpoints.length === 0) {
-      return { orderId, attributions: [], message: 'No touchpoints found' };
+      return { orderId, attributions: [], message: "No touchpoints found" };
     }
 
     const totalRevenue = Number(order.totalAmount);
-    let attributions: { touchpointId: string; creatorId: string; weight: number; revenue: number }[];
+    let attributions: {
+      touchpointId: string;
+      creatorId: string;
+      weight: number;
+      revenue: number;
+    }[];
 
     switch (model) {
-      case 'LAST_TOUCH':
+      case "LAST_TOUCH":
         attributions = [
           {
             touchpointId: touchpoints[touchpoints.length - 1].id,
@@ -63,7 +76,7 @@ export class RevenueAttributionService {
         ];
         break;
 
-      case 'LINEAR': {
+      case "LINEAR": {
         const weight = 1.0 / touchpoints.length;
         attributions = touchpoints.map((tp) => ({
           touchpointId: tp.id,
@@ -74,7 +87,7 @@ export class RevenueAttributionService {
         break;
       }
 
-      case 'TIME_DECAY': {
+      case "TIME_DECAY": {
         // Assign exponentially decaying weights — more recent touchpoints get more credit.
         // weight[i] ∝ 2^(i / half_life) where half_life = touchpoints.length / 2
         const halfLife = Math.max(touchpoints.length / 2, 1);
@@ -82,12 +95,17 @@ export class RevenueAttributionService {
         const total = rawWeights.reduce((s, w) => s + w, 0);
         attributions = touchpoints.map((tp, i) => {
           const w = rawWeights[i] / total;
-          return { touchpointId: tp.id, creatorId: tp.creatorId, weight: w, revenue: totalRevenue * w };
+          return {
+            touchpointId: tp.id,
+            creatorId: tp.creatorId,
+            weight: w,
+            revenue: totalRevenue * w,
+          };
         });
         break;
       }
 
-      case 'FIRST_TOUCH':
+      case "FIRST_TOUCH":
       default:
         attributions = [
           {
@@ -109,7 +127,11 @@ export class RevenueAttributionService {
             customerId: order.customerId,
             creatorId: a.creatorId,
             touchpointId: a.touchpointId,
-            model: model as 'FIRST_TOUCH' | 'LAST_TOUCH' | 'LINEAR' | 'TIME_DECAY',
+            model: model as
+              | "FIRST_TOUCH"
+              | "LAST_TOUCH"
+              | "LINEAR"
+              | "TIME_DECAY",
             attributedRevenue: a.revenue,
             attributionWeight: a.weight,
           },
@@ -117,7 +139,7 @@ export class RevenueAttributionService {
       ),
     );
 
-    void this.webhooks.dispatch('attribution.created', {
+    void this.webhooks.dispatch("attribution.created", {
       orderId,
       model,
       count: results.length,
@@ -125,6 +147,24 @@ export class RevenueAttributionService {
     });
 
     return { orderId, model, attributions: results };
+  }
+
+  async calculateAttributionAsync(
+    orderId: string,
+    rawModel?: string,
+  ): Promise<{ queued: true; orderId: string; model: string }> {
+    const model = resolveModel(rawModel);
+    await this.attributionQueue.add(
+      "calculate",
+      { orderId, rawModel: model },
+      {
+        jobId: `attr-${orderId}-${model}`,
+      },
+    );
+    this.logger.log(
+      `Queued attribution job: orderId=${orderId}, model=${model}`,
+    );
+    return { queued: true, orderId, model };
   }
 
   async getOrderAttribution(orderId: string) {
@@ -144,16 +184,20 @@ export class RevenueAttributionService {
   ) {
     const model = rawModel ? resolveModel(rawModel) : undefined;
     const where: Record<string, unknown> = { creatorId };
-    if (model) where['model'] = model;
+    if (model) where["model"] = model;
     if (dateRange.from || dateRange.to) {
-      where['calculatedAt'] = {
+      where["calculatedAt"] = {
         ...(dateRange.from && { gte: dateRange.from }),
         ...(dateRange.to && { lte: dateRange.to }),
       };
     }
 
     const attributions = await this.prisma.attribution.findMany({
-      where: where as { creatorId: string; model?: 'FIRST_TOUCH' | 'LAST_TOUCH' | 'LINEAR' | 'TIME_DECAY'; calculatedAt?: { gte?: Date; lte?: Date } },
+      where: where as {
+        creatorId: string;
+        model?: "FIRST_TOUCH" | "LAST_TOUCH" | "LINEAR" | "TIME_DECAY";
+        calculatedAt?: { gte?: Date; lte?: Date };
+      },
       include: { order: true },
     });
 

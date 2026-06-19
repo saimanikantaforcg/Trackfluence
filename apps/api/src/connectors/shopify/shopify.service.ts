@@ -1,7 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createHmac } from 'crypto';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { createHmac } from "crypto";
+import { PrismaService } from "../../prisma/prisma.service";
+import { RevenueAttributionService } from "../../revenue-attribution/revenue-attribution.service";
 
 // Shopify order payload (simplified)
 interface ShopifyOrder {
@@ -31,16 +32,17 @@ export class ShopifyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly attributionService: RevenueAttributionService,
   ) {}
 
   // ─── HMAC Verification ────────────────────────────────────
 
   verifyWebhookHmac(rawBody: Buffer, hmacHeader: string): boolean {
-    const secret = this.config.get<string>('SHOPIFY_API_SECRET');
+    const secret = this.config.get<string>("SHOPIFY_API_SECRET");
     if (!secret) return false;
-    const computed = createHmac('sha256', secret)
+    const computed = createHmac("sha256", secret)
       .update(rawBody)
-      .digest('base64');
+      .digest("base64");
     // Constant-time comparison to prevent timing attacks
     if (computed.length !== hmacHeader.length) return false;
     let mismatch = 0;
@@ -53,7 +55,9 @@ export class ShopifyService {
   // ─── Webhook: orders/paid ─────────────────────────────────
 
   async handleOrderPaid(shopDomain: string, order: ShopifyOrder) {
-    this.logger.log(`Shopify order/paid: #${order.order_number} from ${shopDomain}`);
+    this.logger.log(
+      `Shopify order/paid: #${order.order_number} from ${shopDomain}`,
+    );
 
     const externalId = `shopify-${shopDomain}-${order.id}`;
 
@@ -61,7 +65,11 @@ export class ShopifyService {
     let customerId: string | null = null;
     if (order.customer) {
       const customer = await this.prisma.customer.upsert({
-        where: { email: order.customer.email ?? `shopify-${order.customer.id}@placeholder.local` },
+        where: {
+          email:
+            order.customer.email ??
+            `shopify-${order.customer.id}@placeholder.local`,
+        },
         update: {
           orderCount: { increment: 1 },
           totalRevenue: { increment: parseFloat(order.total_price) },
@@ -75,12 +83,25 @@ export class ShopifyService {
           identities: {
             create: [
               ...(order.customer.email
-                ? [{ identityType: 'EMAIL' as const, identityValue: order.customer.email }]
+                ? [
+                    {
+                      identityType: "EMAIL" as const,
+                      identityValue: order.customer.email,
+                    },
+                  ]
                 : []),
               ...(order.customer.phone
-                ? [{ identityType: 'PHONE' as const, identityValue: order.customer.phone }]
+                ? [
+                    {
+                      identityType: "PHONE" as const,
+                      identityValue: order.customer.phone,
+                    },
+                  ]
                 : []),
-              { identityType: 'SHOPIFY_ID' as const, identityValue: String(order.customer.id) },
+              {
+                identityType: "SHOPIFY_ID" as const,
+                identityValue: String(order.customer.id),
+              },
             ],
           },
         },
@@ -98,7 +119,7 @@ export class ShopifyService {
         totalAmount: parseFloat(order.total_price),
         currency: order.currency,
         status: this.mapStatus(order.financial_status),
-        source: 'shopify',
+        source: "shopify",
         orderDate: new Date(order.created_at),
         metadata: { shopDomain, orderNumber: order.order_number },
       },
@@ -108,7 +129,7 @@ export class ShopifyService {
     if (customerId) {
       const lastTouchpoint = await this.prisma.touchPoint.findFirst({
         where: { customerId },
-        orderBy: { timestamp: 'desc' },
+        orderBy: { timestamp: "desc" },
       });
 
       if (lastTouchpoint) {
@@ -117,17 +138,11 @@ export class ShopifyService {
         });
 
         if (!existing) {
-          await this.prisma.attribution.create({
-            data: {
-              orderId: dbOrder.id,
-              customerId,
-              creatorId: lastTouchpoint.creatorId,
-              touchpointId: lastTouchpoint.id,
-              model: 'LAST_TOUCH',
-              attributedRevenue: parseFloat(order.total_price),
-              attributionWeight: 1.0,
-            },
-          });
+          // Queue attribution asynchronously via BullMQ instead of blocking the webhook
+          await this.attributionService.calculateAttributionAsync(
+            dbOrder.id,
+            "LAST_TOUCH",
+          );
 
           // Mark customer as creator-acquired
           await this.prisma.customer.update({
@@ -138,7 +153,9 @@ export class ShopifyService {
             },
           });
 
-          this.logger.log(`Attribution created for order ${dbOrder.id} → creator ${lastTouchpoint.creatorId}`);
+          this.logger.log(
+            `Attribution queued for order ${dbOrder.id} → creator ${lastTouchpoint.creatorId}`,
+          );
         }
       }
     }
@@ -152,10 +169,10 @@ export class ShopifyService {
     const externalId = `shopify-${shopDomain}-${order.id}`;
     await this.prisma.order.updateMany({
       where: { externalId },
-      data: { status: 'CANCELLED' },
+      data: { status: "CANCELLED" },
     });
     this.logger.log(`Order cancelled: ${externalId}`);
-    return { status: 'cancelled' };
+    return { status: "cancelled" };
   }
 
   // ─── Manual sync ──────────────────────────────────────────
@@ -165,35 +182,47 @@ export class ShopifyService {
 
     const syncRecord = await this.prisma.connectorSync.create({
       data: {
-        connectorType: 'shopify',
-        direction: 'inbound',
-        status: 'PROCESSING',
+        connectorType: "shopify",
+        direction: "inbound",
+        status: "PROCESSING",
         metadata: { shopDomain },
       },
     });
 
-    this.logger.log(`Shopify sync ${syncRecord.id} initiated — connect Shopify API credentials to enable`);
+    this.logger.log(
+      `Shopify sync ${syncRecord.id} initiated — connect Shopify API credentials to enable`,
+    );
 
     return {
       syncId: syncRecord.id,
-      status: 'PROCESSING',
-      message: 'Set SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SHOPIFY_STORE_DOMAIN in .env to enable full sync',
+      status: "PROCESSING",
+      message:
+        "Set SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SHOPIFY_STORE_DOMAIN in .env to enable full sync",
     };
   }
 
   async registerWebhook(shopDomain: string, topic: string) {
     this.logger.log(`Webhook registration: ${topic} for ${shopDomain}`);
-    return { topic, endpoint: `/api/v1/connectors/shopify/webhook`, status: 'ready' };
+    return {
+      topic,
+      endpoint: `/api/v1/connectors/shopify/webhook`,
+      status: "ready",
+    };
   }
 
-  private mapStatus(financialStatus: string): 'PENDING' | 'COMPLETED' | 'REFUNDED' | 'CANCELLED' {
-    const map: Record<string, 'PENDING' | 'COMPLETED' | 'REFUNDED' | 'CANCELLED'> = {
-      paid: 'COMPLETED',
-      pending: 'PENDING',
-      refunded: 'REFUNDED',
-      voided: 'CANCELLED',
-      partially_refunded: 'REFUNDED',
+  private mapStatus(
+    financialStatus: string,
+  ): "PENDING" | "COMPLETED" | "REFUNDED" | "CANCELLED" {
+    const map: Record<
+      string,
+      "PENDING" | "COMPLETED" | "REFUNDED" | "CANCELLED"
+    > = {
+      paid: "COMPLETED",
+      pending: "PENDING",
+      refunded: "REFUNDED",
+      voided: "CANCELLED",
+      partially_refunded: "REFUNDED",
     };
-    return map[financialStatus] ?? 'PENDING';
+    return map[financialStatus] ?? "PENDING";
   }
 }

@@ -547,50 +547,78 @@ CREATE UNIQUE INDEX "ConsentRecord_customerId_key" ON "ConsentRecord"("customerI
 
 -- ============================================================
 -- FOREIGN KEY CONSTRAINTS
+-- Only for fields that have @relation in the Prisma schema.
+-- Prisma default onDelete is RESTRICT (NO ACTION in SQL).
 -- ============================================================
 
-ALTER TABLE "Subscription" ADD CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ApiKey" ADD CONSTRAINT "ApiKey_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "UsageRecord" ADD CONSTRAINT "UsageRecord_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "PasswordResetToken" ADD CONSTRAINT "PasswordResetToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CustomerIdentity → Customer (onDelete: Cascade in schema)
+ALTER TABLE "CustomerIdentity" ADD CONSTRAINT "CustomerIdentity_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- ConsentRecord → Customer (onDelete: Cascade in schema)
+ALTER TABLE "ConsentRecord" ADD CONSTRAINT "ConsentRecord_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AudienceMember → Audience (onDelete: Cascade in schema)
+ALTER TABLE "AudienceMember" ADD CONSTRAINT "AudienceMember_audienceId_fkey" FOREIGN KEY ("audienceId") REFERENCES "Audience"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AudienceMember → Customer (no onDelete → RESTRICT)
+ALTER TABLE "AudienceMember" ADD CONSTRAINT "AudienceMember_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- AudienceExport → Audience (no onDelete → RESTRICT)
+ALTER TABLE "AudienceExport" ADD CONSTRAINT "AudienceExport_audienceId_fkey" FOREIGN KEY ("audienceId") REFERENCES "Audience"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- WebhookDelivery → Webhook (onDelete: Cascade in schema)
+ALTER TABLE "WebhookDelivery" ADD CONSTRAINT "WebhookDelivery_webhookId_fkey" FOREIGN KEY ("webhookId") REFERENCES "Webhook"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- OrganizationMember → Organization (onDelete: Cascade in schema)
 ALTER TABLE "OrganizationMember" ADD CONSTRAINT "OrganizationMember_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "OrganizationMember" ADD CONSTRAINT "OrganizationMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- OrganizationMember → User (no onDelete → RESTRICT)
+ALTER TABLE "OrganizationMember" ADD CONSTRAINT "OrganizationMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- OrganizationInvite → Organization (onDelete: Cascade in schema)
 ALTER TABLE "OrganizationInvite" ADD CONSTRAINT "OrganizationInvite_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
-ALTER TABLE "Creator" ADD CONSTRAINT "Creator_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "CreatorInvite" ADD CONSTRAINT "CreatorInvite_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- TrackingLink → Creator (no onDelete → RESTRICT)
+ALTER TABLE "TrackingLink" ADD CONSTRAINT "TrackingLink_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "Campaign" ADD CONSTRAINT "Campaign_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- TrackingLink → Campaign (no onDelete → RESTRICT)
+ALTER TABLE "TrackingLink" ADD CONSTRAINT "TrackingLink_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "TrackingLink" ADD CONSTRAINT "TrackingLink_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "TrackingLink" ADD CONSTRAINT "TrackingLink_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- Event → Customer (no onDelete → RESTRICT)
+ALTER TABLE "Event" ADD CONSTRAINT "Event_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "Event" ADD CONSTRAINT "Event_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "Event" ADD CONSTRAINT "Event_trackingLinkId_fkey" FOREIGN KEY ("trackingLinkId") REFERENCES "TrackingLink"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- Event → TrackingLink (no onDelete → RESTRICT)
+ALTER TABLE "Event" ADD CONSTRAINT "Event_trackingLinkId_fkey" FOREIGN KEY ("trackingLinkId") REFERENCES "TrackingLink"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "CustomerIdentity" ADD CONSTRAINT "CustomerIdentity_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ConsentRecord" ADD CONSTRAINT "ConsentRecord_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_trackingLinkId_fkey" FOREIGN KEY ("trackingLinkId") REFERENCES "TrackingLink"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "Order" ADD CONSTRAINT "Order_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_touchpointId_fkey" FOREIGN KEY ("touchpointId") REFERENCES "TouchPoint"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- TouchPoint → Customer (no onDelete → RESTRICT)
+ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "Payout" ADD CONSTRAINT "Payout_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Payout" ADD CONSTRAINT "Payout_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- TouchPoint → Creator (no onDelete → RESTRICT)
+ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "Audience" ADD CONSTRAINT "Audience_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "AudienceMember" ADD CONSTRAINT "AudienceMember_audienceId_fkey" FOREIGN KEY ("audienceId") REFERENCES "Audience"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "AudienceMember" ADD CONSTRAINT "AudienceMember_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "AudienceExport" ADD CONSTRAINT "AudienceExport_audienceId_fkey" FOREIGN KEY ("audienceId") REFERENCES "Audience"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- TouchPoint → TrackingLink (no onDelete → RESTRICT)
+ALTER TABLE "TouchPoint" ADD CONSTRAINT "TouchPoint_trackingLinkId_fkey" FOREIGN KEY ("trackingLinkId") REFERENCES "TrackingLink"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "FTCComplianceCheck" ADD CONSTRAINT "FTCComplianceCheck_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- Order → Customer (no onDelete → RESTRICT)
+ALTER TABLE "Order" ADD CONSTRAINT "Order_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
-ALTER TABLE "WebhookDelivery" ADD CONSTRAINT "WebhookDelivery_webhookId_fkey" FOREIGN KEY ("webhookId") REFERENCES "Webhook"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "Webhook" ADD CONSTRAINT "Webhook_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- Attribution → Order (no onDelete → RESTRICT)
+ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- Attribution → Customer (no onDelete → RESTRICT)
+ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- Attribution → Creator (no onDelete → RESTRICT)
+ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- Attribution → TouchPoint (no onDelete → RESTRICT)
+ALTER TABLE "Attribution" ADD CONSTRAINT "Attribution_touchpointId_fkey" FOREIGN KEY ("touchpointId") REFERENCES "TouchPoint"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- Payout → Creator (no onDelete → RESTRICT)
+ALTER TABLE "Payout" ADD CONSTRAINT "Payout_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- Payout → Campaign (no onDelete → RESTRICT)
+ALTER TABLE "Payout" ADD CONSTRAINT "Payout_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+-- FTCComplianceCheck → Creator (no onDelete → RESTRICT)
+ALTER TABLE "FTCComplianceCheck" ADD CONSTRAINT "FTCComplianceCheck_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "Creator"("id") ON DELETE NO ACTION ON UPDATE CASCADE;

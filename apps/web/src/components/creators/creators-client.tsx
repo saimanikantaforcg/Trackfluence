@@ -230,10 +230,24 @@ export function CreatorsClient({ initialCreators, scores, token }: CreatorsClien
       </div>
 
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && creators.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 py-16 text-center">
-          <TrendingUp className="mx-auto h-8 w-8 text-slate-300 mb-3" />
-          <p className="text-sm font-medium text-slate-500">No creators found</p>
+          <div className="mx-auto h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center mb-4">
+            <TrendingUp className="h-6 w-6 text-indigo-400" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700">No creators yet</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Add creators to start tracking their performance and attributing revenue</p>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" /> Add your first creator
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center">
+          <Search className="mx-auto h-8 w-8 text-slate-300 mb-3" />
+          <p className="text-sm font-medium text-slate-500">No creators match your filters</p>
           <p className="text-xs text-slate-400 mt-1">Try adjusting your search or platform filter</p>
         </div>
       ) : (

@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 
 export const SHOPIFY_WEBHOOK_QUEUE = "shopify-webhooks";
 export const ATTRIBUTION_QUEUE = "attribution-jobs";
+export const CREATOR_ONBOARDING_QUEUE = "creator-onboarding";
 
 @Global()
 @Module({
@@ -28,6 +29,7 @@ export const ATTRIBUTION_QUEUE = "attribution-jobs";
     }),
     BullModule.registerQueue({ name: SHOPIFY_WEBHOOK_QUEUE }),
     BullModule.registerQueue({ name: ATTRIBUTION_QUEUE }),
+    BullModule.registerQueue({ name: CREATOR_ONBOARDING_QUEUE }),
   ],
   exports: [BullModule],
 })

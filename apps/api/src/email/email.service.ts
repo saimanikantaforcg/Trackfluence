@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Resend } from "resend";
 
 @Injectable()
 export class EmailService {
@@ -10,13 +10,18 @@ export class EmailService {
   private readonly enabled: boolean;
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = config.get<string>('RESEND_API_KEY');
+    const apiKey = config.get<string>("RESEND_API_KEY");
     this.enabled = !!apiKey;
     this.resend = apiKey ? new Resend(apiKey) : null;
-    this.from = config.get<string>('EMAIL_FROM', 'Trackfluence <noreply@trackfluence.io>');
+    this.from = config.get<string>(
+      "EMAIL_FROM",
+      "Trackfluence <noreply@trackfluence.io>",
+    );
 
     if (!this.enabled) {
-      this.logger.warn('RESEND_API_KEY not set — emails are disabled (dev mode)');
+      this.logger.warn(
+        "RESEND_API_KEY not set — emails are disabled (dev mode)",
+      );
     }
   }
 
@@ -24,22 +29,30 @@ export class EmailService {
   async sendWelcome(to: string, name: string): Promise<void> {
     await this.send({
       to,
-      subject: 'Welcome to Trackfluence 🚀',
+      subject: "Welcome to Trackfluence 🚀",
       html: this.welcomeHtml(name),
     });
   }
 
   // ── Password reset (future) ───────────────────────────────
-  async sendPasswordReset(to: string, name: string, resetUrl: string): Promise<void> {
+  async sendPasswordReset(
+    to: string,
+    name: string,
+    resetUrl: string,
+  ): Promise<void> {
     await this.send({
       to,
-      subject: 'Reset your Trackfluence password',
+      subject: "Reset your Trackfluence password",
       html: this.passwordResetHtml(name, resetUrl),
     });
   }
 
   // ── Creator invite ────────────────────────────────────────
-  async sendCreatorInvite(to: string, inviterName: string, inviteUrl: string): Promise<void> {
+  async sendCreatorInvite(
+    to: string,
+    inviterName: string,
+    inviteUrl: string,
+  ): Promise<void> {
     await this.send({
       to,
       subject: `${inviterName} invited you to Trackfluence`,
@@ -96,9 +109,15 @@ export class EmailService {
   }
 
   // ─────────────────────────────────────────────────────────
-  private async send(opts: { to: string; subject: string; html: string }): Promise<void> {
+  private async send(opts: {
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<void> {
     if (!this.enabled || !this.resend) {
-      this.logger.debug(`[Email skipped — no API key] To: ${opts.to} | Subject: ${opts.subject}`);
+      this.logger.debug(
+        `[Email skipped — no API key] To: ${opts.to} | Subject: ${opts.subject}`,
+      );
       return;
     }
     try {
@@ -110,8 +129,10 @@ export class EmailService {
       });
       if (error) throw new Error(error.message);
       this.logger.log(`Email sent: "${opts.subject}" → ${opts.to}`);
-    } catch (err: unknown) {
-      this.logger.error(`Email failed: ${err instanceof Error ? err.message : String(err)}`);
+    } catch (err) {
+      this.logger.error(
+        `Email failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -124,7 +145,7 @@ export class EmailService {
   <p style="color:#a1a1aa;line-height:1.6">
     Your account is ready. Start tracking creator-attributed revenue and unlocking insights from your influencer campaigns.
   </p>
-  <a href="${this.config.get('APP_URL', 'http://localhost:3000')}/dashboard"
+  <a href="${this.config.get("APP_URL", "http://localhost:3000")}/dashboard"
      style="display:inline-block;margin-top:24px;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
     Go to Dashboard →
   </a>
@@ -164,10 +185,12 @@ export class EmailService {
     contentUrl: string,
     issues: string[],
   ): Promise<void> {
-    const issueList = issues.map((i) => `<li style="color:#fca5a5;margin-bottom:4px">${i}</li>`).join('');
+    const issueList = issues
+      .map((i) => `<li style="color:#fca5a5;margin-bottom:4px">${i}</li>`)
+      .join("");
     await this.send({
       to,
-      subject: 'Action Required: FTC Compliance Issue Detected',
+      subject: "Action Required: FTC Compliance Issue Detected",
       html: `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>Compliance Notice</title></head>
 <body style="font-family:sans-serif;background:#09090b;color:#fafafa;padding:40px;max-width:600px;margin:0 auto">
@@ -186,22 +209,123 @@ export class EmailService {
     });
   }
 
+  // ── Creator onboarding drip ────────────────────────────────
+
+  async sendCreatorOnboardingDay1(
+    to: string,
+    creatorName: string,
+    portalUrl: string,
+  ): Promise<void> {
+    await this.send({
+      to,
+      subject:
+        "Your creator portal is live — here's how to make the most of it",
+      html: `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Your Portal is Live</title></head>
+<body style="font-family:sans-serif;background:#09090b;color:#fafafa;padding:40px;max-width:600px;margin:0 auto">
+  <h1 style="color:#6366f1;margin-bottom:8px">Welcome to your creator portal, ${creatorName} 👋</h1>
+  <p style="color:#a1a1aa;line-height:1.6">Your portal is live. Here's what you can do right now:</p>
+  <ul style="color:#a1a1aa;line-height:1.8;padding-left:20px">
+    <li><strong style="color:#fafafa">View your links</strong> — see every tracking URL assigned to you</li>
+    <li><strong style="color:#fafafa">Track clicks</strong> — real-time click counts per link</li>
+    <li><strong style="color:#fafafa">See your revenue</strong> — attributed sales and commissions</li>
+    <li><strong style="color:#fafafa">Share your link</strong> — copy-paste ready URLs for Instagram, TikTok, YouTube</li>
+  </ul>
+  <a href="${portalUrl}" style="display:inline-block;margin-top:24px;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+    Open Your Portal →
+  </a>
+  <p style="margin-top:32px;color:#71717a;font-size:13px">Pro tip: Pin your tracking link to your Instagram bio for maximum visibility.</p>
+  <p style="margin-top:40px;color:#52525b;font-size:12px">Trackfluence · Creator Portal</p>
+</body></html>`,
+    });
+  }
+
+  async sendCreatorOnboardingDay3(
+    to: string,
+    creatorName: string,
+    portalUrl: string,
+  ): Promise<void> {
+    await this.send({
+      to,
+      subject: "3 quick tips to boost your attributed revenue",
+      html: `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Boost Your Revenue</title></head>
+<body style="font-family:sans-serif;background:#09090b;color:#fafafa;padding:40px;max-width:600px;margin:0 auto">
+  <h1 style="color:#6366f1;margin-bottom:8px">3 tips to earn more, ${creatorName}</h1>
+  <p style="color:#a1a1aa;line-height:1.6">Most creators who follow these three habits see 2–3x more attributed revenue in their first month:</p>
+  <ol style="color:#a1a1aa;line-height:1.8;padding-left:20px">
+    <li><strong style="color:#fafafa">Add your link to every platform</strong> — Instagram bio, TikTok description, YouTube description, and Linktree.</li>
+    <li><strong style="color:#fafafa">Create content around the product</strong> — tutorials, reviews, and unboxings drive the highest conversion rates.</li>
+    <li><strong style="color:#fafafa">Check your dashboard weekly</strong> — see which links perform best and double down on what works.</li>
+  </ol>
+  <a href="${portalUrl}" style="display:inline-block;margin-top:24px;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+    View Your Dashboard →
+  </a>
+  <p style="margin-top:40px;color:#52525b;font-size:12px">Trackfluence · Creator Tips</p>
+</body></html>`,
+    });
+  }
+
+  async sendCreatorOnboardingDay14(
+    to: string,
+    creatorName: string,
+    portalUrl: string,
+  ): Promise<void> {
+    await this.send({
+      to,
+      subject: "How's it going? Your 2-week check-in",
+      html: `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>2-Week Check-in</title></head>
+<body style="font-family:sans-serif;background:#09090b;color:#fafafa;padding:40px;max-width:600px;margin:0 auto">
+  <h1 style="color:#6366f1;margin-bottom:8px">Two weeks in — how's it going, ${creatorName}?</h1>
+  <p style="color:#a1a1aa;line-height:1.6">You've had your portal for two weeks now. Here's what's available next:</p>
+  <ul style="color:#a1a1aa;line-height:1.8;padding-left:20px">
+    <li><strong style="color:#fafafa">Payout history</strong> — see every payment and its status</li>
+    <li><strong style="color:#fafafa">Performance trends</strong> — revenue over time, by link and by campaign</li>
+    <li><strong style="color:#fafafa">Audience insights</strong> — understand which customer segments you're driving</li>
+  </ul>
+  <p style="color:#a1a1aa;line-height:1.6">Questions? Just reply to this email — we read every message.</p>
+  <a href="${portalUrl}" style="display:inline-block;margin-top:24px;padding:12px 24px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+    Open Your Portal →
+  </a>
+  <p style="margin-top:40px;color:#52525b;font-size:12px">Trackfluence · Creator Success</p>
+</body></html>`,
+    });
+  }
+
   // ── Attribution report ────────────────────────────────────
   async sendReport(
     to: string,
     name: string,
     since: Date,
-    stats: Array<{ name: string; email: string | null; attributedRevenue: number; attributionCount: number; totalClicks: number }>,
+    stats: Array<{
+      name: string;
+      email: string | null;
+      attributedRevenue: number;
+      attributionCount: number;
+      totalClicks: number;
+    }>,
     csv: string,
   ): Promise<void> {
-    const rows = stats.slice(0, 10).map(
-      (s) => `<tr>
-        <td style="padding:8px 12px;border-bottom:1px solid #27272a">${s.name}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">$${s.attributedRevenue.toFixed(2)}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">${s.attributionCount}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">${s.totalClicks}</td>
-      </tr>`
-    ).join('');
+    const rows = stats
+      .slice(0, 10)
+      .map(
+        (s) => `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #27272a">${
+          s.name
+        }</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">$${s.attributedRevenue.toFixed(
+          2,
+        )}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">${
+          s.attributionCount
+        }</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #27272a;text-align:right">${
+          s.totalClicks
+        }</td>
+      </tr>`,
+      )
+      .join("");
 
     const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>Attribution Report</title></head>
@@ -217,12 +341,17 @@ export class EmailService {
         <th style="padding:10px 12px;text-align:right;color:#a1a1aa;font-size:12px;text-transform:uppercase">Clicks</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#52525b">No attribution data this period</td></tr>'}</tbody>
+    <tbody>${rows ||
+      '<tr><td colspan="4" style="padding:16px;text-align:center;color:#52525b">No attribution data this period</td></tr>'}</tbody>
   </table>
   <p style="margin-top:24px;color:#52525b;font-size:12px">A full CSV export is available in your Trackfluence dashboard → Reports.</p>
   <p style="margin-top:8px;color:#3f3f46;font-size:11px">Trackfluence · Automated weekly report</p>
 </body></html>`;
 
-    await this.send({ to, subject: `Trackfluence Weekly Report — ${new Date().toDateString()}`, html });
+    await this.send({
+      to,
+      subject: `Trackfluence Weekly Report — ${new Date().toDateString()}`,
+      html,
+    });
   }
 }

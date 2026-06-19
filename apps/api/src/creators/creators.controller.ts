@@ -1,14 +1,35 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, Req, BadRequestException, NotFoundException } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, IsNumber, Min, Max } from 'class-validator';
-import { PrismaService } from '../prisma/prisma.service';
-import { EmailService } from '../email/email.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { WebhooksService } from '../webhooks/webhooks.service';
-import { CurrentOrg } from '../organizations/current-org.decorator';
-import { randomBytes } from 'crypto';
-import { Request } from 'express';
-import { Public } from '../auth/public.decorator';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+  Req,
+  BadRequestException,
+  NotFoundException,
+} from "@nestjs/common";
+import { ApiTags, ApiOperation } from "@nestjs/swagger";
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  IsNumber,
+  Min,
+  Max,
+} from "class-validator";
+import { PrismaService } from "../prisma/prisma.service";
+import { EmailService } from "../email/email.service";
+import { NotificationsService } from "../notifications/notifications.service";
+import { WebhooksService } from "../webhooks/webhooks.service";
+import { CurrentOrg } from "../organizations/current-org.decorator";
+import { randomBytes } from "crypto";
+import { Request } from "express";
+import { Public } from "../auth/public.decorator";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { CREATOR_ONBOARDING_QUEUE } from "../queue/queue.module";
 
 interface AuthedRequest extends Request {
   user: { sub: string; role: string };
@@ -38,33 +59,38 @@ class UpdateCommissionDto {
   commissionRate!: number;
 }
 
-@ApiTags('Creators')
-@Controller('api/v1/creators')
+@ApiTags("Creators")
+@Controller("api/v1/creators")
 export class CreatorsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly notif: NotificationsService,
     private readonly webhooks: WebhooksService,
+    @InjectQueue(CREATOR_ONBOARDING_QUEUE)
+    private readonly onboardingQueue: Queue,
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all creators' })
-  async findAll(@Query('search') search?: string, @CurrentOrg() orgId?: string) {
+  @ApiOperation({ summary: "List all creators" })
+  async findAll(
+    @Query("search") search?: string,
+    @CurrentOrg() orgId?: string,
+  ) {
     return this.prisma.creator.findMany({
       where: {
         ...(orgId ? { organizationId: orgId } : {}),
         ...(search
           ? {
               OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { handle: { contains: search, mode: 'insensitive' } },
-                { email: { contains: search, mode: 'insensitive' } },
+                { name: { contains: search, mode: "insensitive" } },
+                { handle: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
               ],
             }
           : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         name: true,
@@ -79,18 +105,18 @@ export class CreatorsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a creator' })
+  @ApiOperation({ summary: "Create a creator" })
   async create(@Body() dto: CreateCreatorDto) {
     const creator = await this.prisma.creator.create({ data: dto });
     // fire-and-forget audit
     void this.notif.notify({
-      userId: 'system',
-      type: 'creator.created',
-      title: 'New Creator Added',
+      userId: "system",
+      type: "creator.created",
+      title: "New Creator Added",
       body: `Creator "${creator.name}" was added to Trackfluence.`,
       link: `/creators/${creator.id}`,
     });
-    void this.webhooks.dispatch('creator.created', {
+    void this.webhooks.dispatch("creator.created", {
       id: creator.id,
       name: creator.name,
       email: creator.email,
@@ -100,14 +126,18 @@ export class CreatorsController {
     return creator;
   }
 
-  @Get('portal/timeseries')
+  @Get("portal/timeseries")
   @Public()
-  @ApiOperation({ summary: 'Monthly attributed revenue series for portal chart' })
-  async portalTimeSeries(@Query('token') token: string) {
-    if (!token) throw new BadRequestException('token is required');
-    const invite = await this.prisma.creatorInvite.findUnique({ where: { token } });
+  @ApiOperation({
+    summary: "Monthly attributed revenue series for portal chart",
+  })
+  async portalTimeSeries(@Query("token") token: string) {
+    if (!token) throw new BadRequestException("token is required");
+    const invite = await this.prisma.creatorInvite.findUnique({
+      where: { token },
+    });
     if (!invite || invite.expiresAt < new Date()) {
-      throw new NotFoundException('Invite link is invalid or has expired');
+      throw new NotFoundException("Invite link is invalid or has expired");
     }
     // Group attributions by month for last 12 months
     const since = new Date();
@@ -118,14 +148,17 @@ export class CreatorsController {
     const attributions = await this.prisma.attribution.findMany({
       where: { creatorId: invite.creatorId, calculatedAt: { gte: since } },
       select: { calculatedAt: true, attributedRevenue: true },
-      orderBy: { calculatedAt: 'asc' },
+      orderBy: { calculatedAt: "asc" },
     });
 
     // Aggregate by month (YYYY-MM)
     const monthMap = new Map<string, number>();
     for (const a of attributions) {
       const key = a.calculatedAt.toISOString().slice(0, 7);
-      monthMap.set(key, (monthMap.get(key) ?? 0) + Number(a.attributedRevenue ?? 0));
+      monthMap.set(
+        key,
+        (monthMap.get(key) ?? 0) + Number(a.attributedRevenue ?? 0),
+      );
     }
 
     // Fill all 12 months even if 0
@@ -139,28 +172,39 @@ export class CreatorsController {
     return result;
   }
 
-  @Get('portal')
+  @Get("portal")
   @Public()
-  @ApiOperation({ summary: 'Creator self-service portal (token-gated, no auth required)' })
-  async portal(@Query('token') token: string) {
-    if (!token) throw new BadRequestException('token is required');
-    const invite = await this.prisma.creatorInvite.findUnique({ where: { token } });
+  @ApiOperation({
+    summary: "Creator self-service portal (token-gated, no auth required)",
+  })
+  async portal(@Query("token") token: string) {
+    if (!token) throw new BadRequestException("token is required");
+    const invite = await this.prisma.creatorInvite.findUnique({
+      where: { token },
+    });
     if (!invite || invite.expiresAt < new Date()) {
-      throw new NotFoundException('Invite link is invalid or has expired');
+      throw new NotFoundException("Invite link is invalid or has expired");
     }
     const [creator, payouts, attributionStats] = await Promise.all([
       this.prisma.creator.findUniqueOrThrow({
         where: { id: invite.creatorId },
         include: {
-          trackingLinks: { orderBy: { createdAt: 'desc' }, take: 20 },
+          trackingLinks: { orderBy: { createdAt: "desc" }, take: 20 },
           _count: { select: { attributions: true, touchpoints: true } },
         },
       }),
       this.prisma.payout.findMany({
         where: { creatorId: invite.creatorId },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         take: 50,
-        select: { id: true, amount: true, currency: true, status: true, periodStart: true, periodEnd: true },
+        select: {
+          id: true,
+          amount: true,
+          currency: true,
+          status: true,
+          periodStart: true,
+          periodEnd: true,
+        },
       }),
       this.prisma.attribution.aggregate({
         where: { creatorId: invite.creatorId },
@@ -176,21 +220,24 @@ export class CreatorsController {
     };
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get creator by ID' })
-  async findOne(@Param('id') id: string) {
+  @Get(":id")
+  @ApiOperation({ summary: "Get creator by ID" })
+  async findOne(@Param("id") id: string) {
     return this.prisma.creator.findUniqueOrThrow({
       where: { id },
       include: {
-        trackingLinks: { orderBy: { createdAt: 'desc' }, take: 10 },
+        trackingLinks: { orderBy: { createdAt: "desc" }, take: 10 },
         _count: { select: { attributions: true, touchpoints: true } },
       },
     });
   }
 
-  @Patch(':id/commission')
-  @ApiOperation({ summary: 'Update creator commission rate' })
-  async updateCommission(@Param('id') id: string, @Body() dto: UpdateCommissionDto) {
+  @Patch(":id/commission")
+  @ApiOperation({ summary: "Update creator commission rate" })
+  async updateCommission(
+    @Param("id") id: string,
+    @Body() dto: UpdateCommissionDto,
+  ) {
     return this.prisma.creator.update({
       where: { id },
       data: { commissionRate: dto.commissionRate },
@@ -198,34 +245,79 @@ export class CreatorsController {
     });
   }
 
-  @Post(':id/invite')
-  @ApiOperation({ summary: 'Send invite email to creator' })
-  async invite(@Param('id') id: string, @Req() req: AuthedRequest) {
+  @Post(":id/invite")
+  @ApiOperation({ summary: "Send invite email to creator" })
+  async invite(@Param("id") id: string, @Req() req: AuthedRequest) {
     const creator = await this.prisma.creator.findUnique({ where: { id } });
-    if (!creator) throw new BadRequestException('Creator not found');
-    if (!creator.email) throw new BadRequestException('Creator has no email address');
+    if (!creator) throw new BadRequestException("Creator not found");
+    if (!creator.email)
+      throw new BadRequestException("Creator has no email address");
 
-    const token = randomBytes(32).toString('hex');
+    const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     await this.prisma.creatorInvite.upsert({
       where: { creatorId: id },
       update: { token, expiresAt, invitedBy: req.user.sub, acceptedAt: null },
-      create: { creatorId: id, invitedBy: req.user.sub, token, email: creator.email, expiresAt },
+      create: {
+        creatorId: id,
+        invitedBy: req.user.sub,
+        token,
+        email: creator.email,
+        expiresAt,
+      },
     });
 
-    const inviteUrl = `${process.env.APP_URL ?? 'http://localhost:3000'}/portal?token=${token}`;
-    const sender = await this.prisma.user.findUnique({ where: { id: req.user.sub }, select: { name: true } });
-    void this.email.sendCreatorInvite(creator.email, sender?.name ?? 'Trackfluence', inviteUrl);
+    const inviteUrl = `${process.env.APP_URL ??
+      "http://localhost:3000"}/portal?token=${token}`;
+    const sender = await this.prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: { name: true },
+    });
+    void this.email.sendCreatorInvite(
+      creator.email,
+      sender?.name ?? "Trackfluence",
+      inviteUrl,
+    );
+
+    // Queue onboarding drip emails: day 1, day 3, day 14
+    const delayDay3 = 3 * 24 * 60 * 60 * 1000;
+    const delayDay14 = 14 * 24 * 60 * 60 * 1000;
+    void this.onboardingQueue.add("day1", {
+      creatorEmail: creator.email,
+      creatorName: creator.name,
+      portalUrl: inviteUrl,
+      step: "day1",
+    });
+    void this.onboardingQueue.add(
+      "day3",
+      {
+        creatorEmail: creator.email,
+        creatorName: creator.name,
+        portalUrl: inviteUrl,
+        step: "day3",
+      },
+      { delay: delayDay3 },
+    );
+    void this.onboardingQueue.add(
+      "day14",
+      {
+        creatorEmail: creator.email,
+        creatorName: creator.name,
+        portalUrl: inviteUrl,
+        step: "day14",
+      },
+      { delay: delayDay14 },
+    );
 
     void this.notif.notify({
       userId: req.user.sub,
-      type: 'creator.invited',
-      title: 'Creator Invited',
+      type: "creator.invited",
+      title: "Creator Invited",
       body: `Invite sent to ${creator.name} (${creator.email}).`,
       link: `/creators/${id}`,
     });
-    void this.webhooks.dispatch('creator.invited', {
+    void this.webhooks.dispatch("creator.invited", {
       creatorId: id,
       email: creator.email,
       invitedBy: req.user.sub,
@@ -234,34 +326,60 @@ export class CreatorsController {
     return { invited: true, email: creator.email };
   }
 
-  @Post('import')
-  @ApiOperation({ summary: 'Bulk import creators from CSV text (name,email,handle,platform)' })
+  @Post("import")
+  @ApiOperation({
+    summary: "Bulk import creators from CSV text (name,email,handle,platform)",
+  })
   async bulkImport(@Body() body: { csv: string }) {
-    if (!body.csv?.trim()) throw new BadRequestException('csv field is required');
+    if (!body.csv?.trim())
+      throw new BadRequestException("csv field is required");
 
-    const lines = body.csv.trim().split('\n').filter(Boolean);
-    const header = lines[0]?.toLowerCase().replace(/\r/g, '').split(',').map(h => h.trim()) ?? [];
-    const nameIdx = header.indexOf('name');
-    const emailIdx = header.indexOf('email');
-    const handleIdx = header.indexOf('handle');
-    const platformIdx = header.indexOf('platform');
+    const lines = body.csv
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    const header =
+      lines[0]
+        ?.toLowerCase()
+        .replace(/\r/g, "")
+        .split(",")
+        .map((h) => h.trim()) ?? [];
+    const nameIdx = header.indexOf("name");
+    const emailIdx = header.indexOf("email");
+    const handleIdx = header.indexOf("handle");
+    const platformIdx = header.indexOf("platform");
 
-    if (nameIdx === -1) throw new BadRequestException('CSV must have a "name" column');
+    if (nameIdx === -1)
+      throw new BadRequestException('CSV must have a "name" column');
 
-    const results = { created: 0, skipped: 0, failed: 0, errors: [] as string[] };
+    const results = {
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
 
     for (const line of lines.slice(1)) {
-      const cols = line.replace(/\r/g, '').split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      const cols = line
+        .replace(/\r/g, "")
+        .split(",")
+        .map((c) => c.trim().replace(/^"|"$/g, ""));
       const name = cols[nameIdx]?.trim();
-      if (!name) { results.failed++; continue; }
+      if (!name) {
+        results.failed++;
+        continue;
+      }
 
-      const email = emailIdx >= 0 && cols[emailIdx] ? cols[emailIdx] : undefined;
-      const handle = handleIdx >= 0 && cols[handleIdx] ? cols[handleIdx] : undefined;
-      const platform = platformIdx >= 0 && cols[platformIdx] ? cols[platformIdx] : undefined;
+      const email =
+        emailIdx >= 0 && cols[emailIdx] ? cols[emailIdx] : undefined;
+      const handle =
+        handleIdx >= 0 && cols[handleIdx] ? cols[handleIdx] : undefined;
+      const platform =
+        platformIdx >= 0 && cols[platformIdx] ? cols[platformIdx] : undefined;
 
       try {
         await this.prisma.creator.upsert({
-          where: { email: email ?? '' },
+          where: { email: email ?? "" },
           update: { name, handle, platform },
           create: { name, email, handle, platform },
         });

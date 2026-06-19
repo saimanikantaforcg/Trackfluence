@@ -26,7 +26,7 @@
 
 Trackfluence is a **B2B SaaS platform** that answers one question most brands can't:
 
-> *Which creator actually drove that sale — and what's that customer worth long-term?*
+> _Which creator actually drove that sale — and what's that customer worth long-term?_
 
 It connects creator activity (tracked links, promo codes, content) to revenue events (purchases, subscriptions) through a **multi-touch attribution engine**, giving brands the data they need to pay creators fairly, forecast revenue, and activate audiences.
 
@@ -43,21 +43,24 @@ Creator posts link → Customer clicks → Customer buys
 
 ## Features at a Glance
 
-| Feature | Description |
-|---------|-------------|
-| 🔗 **Tracking Links** | 8-char short codes with UTM params, QR codes, promo codes |
-| 📊 **Multi-Touch Attribution** | First Touch, Last Touch, Linear, Time Decay models |
-| 🧠 **Revenue Intelligence** | Creator scores, ROAS, cohort analysis, revenue forecasting |
-| 👥 **Creator Management** | Profiles, commission rates, portal, bulk CSV import |
-| 💸 **Payout Automation** | Commission calculation, approval workflow, bulk approve |
-| 🎯 **Audience Segmentation** | Rule-based segments → Salesforce / SFMC / Shopify export |
-| ✅ **FTC Compliance** | Auto-detect missing disclosures, email violations to creators |
-| 🔔 **Real-time Notifications** | Socket.io push + Slack/Discord webhooks |
-| 🏢 **Multi-tenancy** | Organizations with OWNER / ADMIN / MEMBER / VIEWER roles |
-| 💳 **Billing** | Stripe subscriptions (Free / Starter $49 / Growth $149 / Enterprise) |
-| 🔌 **Integrations** | Shopify, Salesforce, Meta CAPI, Resend, PostHog, Sentry |
-| 🔑 **API Keys** | Scoped keys for programmatic access |
-| 📤 **Outbound Webhooks** | 21 event types, HMAC-signed delivery |
+| Feature                        | Description                                                          |
+| ------------------------------ | -------------------------------------------------------------------- |
+| 🔗 **Tracking Links**          | 8-char short codes with UTM params, QR codes, promo codes            |
+| 📊 **Multi-Touch Attribution** | First Touch, Last Touch, Linear, Time Decay models                   |
+| 🧠 **Revenue Intelligence**    | Creator scores, ROAS, cohort analysis, revenue forecasting           |
+| 👥 **Creator Management**      | Profiles, commission rates, portal, bulk CSV import                  |
+| 💸 **Payout Automation**       | Commission calculation, approval workflow, bulk approve              |
+| 🎯 **Audience Segmentation**   | Rule-based segments → Salesforce / SFMC / Shopify export             |
+| ✅ **FTC Compliance**          | Auto-detect missing disclosures, email violations to creators        |
+| 🔔 **Real-time Notifications** | Socket.io push + Slack/Discord webhooks                              |
+| 🏢 **Multi-tenancy**           | Organizations with OWNER / ADMIN / MEMBER / VIEWER roles             |
+| 💳 **Billing**                 | Stripe subscriptions (Free / Starter $49 / Growth $149 / Enterprise) |
+| 🔌 **Integrations**            | Shopify, Salesforce, Meta CAPI, Resend, PostHog, Sentry              |
+| 🔑 **API Keys**                | Scoped keys for programmatic access                                  |
+| 📤 **Outbound Webhooks**       | 21 event types, HMAC-signed delivery                                 |
+| 📧 **Creator Onboarding**      | Automated email drip sequences (Day 1, 3, 14) via BullMQ             |
+| 🏗️ **Async Processing**        | BullMQ job queues for attribution + onboarding + Shopify webhooks    |
+| 📱 **PWA Install**             | Creator portal installable as mobile app (Add to Home Screen)        |
 
 ---
 
@@ -72,6 +75,8 @@ Creator posts link → Customer clicks → Customer buys
 │  Database   PostgreSQL 16 · Prisma 6                         │
 ├─────────────────────────────────────────────────────────────┤
 │  Cache/Queue Redis 7 · cache-manager · BullMQ                │
+├─────────────────────────────────────────────────────────────┤
+│  Email      Resend (transactional + drip sequences)          │
 ├─────────────────────────────────────────────────────────────┤
 │  Auth       JWT (7-day) · bcrypt-12 · Edge middleware        │
 ├─────────────────────────────────────────────────────────────┤
@@ -102,6 +107,7 @@ trackfluence/
 │   │       ├── creators/       # Creator profiles, portal, CSV import
 │   │       ├── organizations/  # Multi-tenancy, invites, domain settings
 │   │       ├── payouts/        # Commission calculation & payout workflow
+│   │       ├── queue/          # BullMQ processors (attribution, onboarding, shopify)
 │   │       ├── realtime/       # Socket.io gateway
 │   │       ├── revenue-intelligence/ # KPIs, scores, forecasting
 │   │       └── webhooks/       # Outbound webhook delivery (21 events)
@@ -138,11 +144,11 @@ trackfluence/
 
 ### Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Node.js | ≥ 22 |
-| pnpm | ≥ 9 |
-| Docker Desktop | Latest |
+| Tool           | Version |
+| -------------- | ------- |
+| Node.js        | ≥ 22    |
+| pnpm           | ≥ 9     |
+| Docker Desktop | Latest  |
 
 ### 1. Clone & Install
 
@@ -181,11 +187,14 @@ All other variables are optional for local development (Stripe, Resend, Sentry, 
 # Generate Prisma client
 pnpm db:generate
 
-# Push schema to local DB (first time only)
-pnpm --filter @trackfluence/database exec prisma db push
+# Run migrations (first time only — creates all tables)
+pnpm --filter @trackfluence/database exec prisma migrate deploy
 
 # Optional: seed with sample data
 pnpm --filter @trackfluence/database exec prisma db seed
+
+# Optional: seed demo data via API (requires running API)
+# POST /api/v1/admin/seed-demo (ADMIN only)
 ```
 
 ### 5. Start Development Servers
@@ -194,13 +203,13 @@ pnpm --filter @trackfluence/database exec prisma db seed
 pnpm dev
 ```
 
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:3000 |
-| API | http://localhost:4000 |
-| Swagger Docs | http://localhost:4000/api/docs |
-| Bull Board (queues) | http://localhost:4000/api/admin/queues |
-| Prisma Studio | `pnpm --filter @trackfluence/database exec prisma studio` |
+| Service             | URL                                                       |
+| ------------------- | --------------------------------------------------------- |
+| Frontend            | http://localhost:3000                                     |
+| API                 | http://localhost:4000                                     |
+| Swagger Docs        | http://localhost:4000/api/docs                            |
+| Bull Board (queues) | http://localhost:4000/api/admin/queues                    |
+| Prisma Studio       | `pnpm --filter @trackfluence/database exec prisma studio` |
 
 ---
 
@@ -230,12 +239,12 @@ pnpm dev
 
 ### Attribution Models
 
-| Model | How credit is split |
-|-------|-------------------|
-| **First Touch** | 100% to the first creator in the journey |
-| **Last Touch** | 100% to the last creator before purchase |
-| **Linear** | Equal split across all creators with touchpoints |
-| **Time Decay** | Higher weight to more recent touchpoints |
+| Model           | How credit is split                              |
+| --------------- | ------------------------------------------------ |
+| **First Touch** | 100% to the first creator in the journey         |
+| **Last Touch**  | 100% to the last creator before purchase         |
+| **Linear**      | Equal split across all creators with touchpoints |
+| **Time Decay**  | Higher weight to more recent touchpoints         |
 
 ### Creator Scoring
 
@@ -278,6 +287,7 @@ GET    /auth/me                          Current user
 GET    /creators                         List creators
 POST   /creators                         Create creator
 POST   /creators/import                  Bulk CSV import
+POST   /creators/:id/invite              Send portal invite (triggers onboarding emails)
 
 POST   /campaigns                        Create campaign
 GET    /campaigns/:id/stats              ROI stats
@@ -286,6 +296,7 @@ POST   /campaigns/:id/variants           A/B variant link
 POST   /attribution/tracking-links       Create tracking link
 GET    /attribution/r/:shortCode         Click redirect (public)
 POST   /attribution/server-events        Server-side event ingest
+POST   /revenue-attribution/calculate/:orderId/async  Queue attribution (BullMQ)
 
 GET    /revenue-intelligence/dashboard   KPIs
 GET    /revenue-intelligence/creators/scores  Creator leaderboard
@@ -296,6 +307,8 @@ GET    /payouts/export/csv               Download payout CSV
 
 POST   /compliance/check                 Run FTC check
 POST   /audiences/:id/export             Push to Salesforce/Shopify
+
+POST   /admin/seed-demo                  Seed demo data (ADMIN only)
 ```
 
 Full endpoint list in [DOCUMENTATION.md → Section 5](./DOCUMENTATION.md#5-api-reference).
@@ -304,16 +317,16 @@ Full endpoint list in [DOCUMENTATION.md → Section 5](./DOCUMENTATION.md#5-api-
 
 ## Billing Plans
 
-| | Free | Starter | Growth | Enterprise |
-|-|------|---------|--------|------------|
-| **Price** | $0 | $49/mo | $149/mo | Custom |
-| Creators | 3 | 15 | 100 | ∞ |
-| Tracking Links | 10 | 100 | 1,000 | ∞ |
-| Attribution Runs | 50 | 1,000 | 20,000 | ∞ |
-| Team Members | 1 | 3 | 10 | ∞ |
-| Webhooks | 0 | 5 | 20 | ∞ |
-| Revenue Forecast | ✗ | ✗ | ✓ | ✓ |
-| White-label Domain | ✗ | ✗ | ✓ | ✓ |
+|                    | Free | Starter | Growth   | Enterprise |
+| ------------------ | ---- | ------- | -------- | ---------- |
+| **Price**          | \$0  | \$49/mo | \$149/mo | Custom     |
+| Creators           | 3    | 15      | 100      | ∞          |
+| Tracking Links     | 10   | 100     | 1,000    | ∞          |
+| Attribution Runs   | 50   | 1,000   | 20,000   | ∞          |
+| Team Members       | 1    | 3       | 10       | ∞          |
+| Webhooks           | 0    | 5       | 20       | ∞          |
+| Revenue Forecast   | ✗    | ✗       | ✓        | ✓          |
+| White-label Domain | ✗    | ✗       | ✓        | ✓          |
 
 ---
 
@@ -336,6 +349,7 @@ pnpm --filter @trackfluence/web e2e
 ```
 
 **Current test status:**
+
 - ✅ 31/31 unit tests passing
 - ✅ 0 TypeScript errors (API + Web + Shared)
 - ✅ 26/26 Next.js pages build successfully
@@ -385,41 +399,41 @@ curl http://localhost:4000/api/health
 
 ### First-Deploy Database
 
-On first boot with no migration history, `start.sh` automatically runs `prisma db push` to create all tables. Subsequent deploys use `prisma migrate deploy`.
+On first boot with no migration history, `start.sh` automatically runs `prisma migrate deploy` to apply all committed migrations. The initial migration (`0_init`) creates all 28 tables, 15 enums, indexes, and foreign key constraints.
 
 ---
 
 ## Security
 
-| Concern | Implementation |
-|---------|---------------|
-| Authentication | JWT HS256, 7-day expiry |
-| Passwords | bcrypt rounds=12 |
-| API Keys | SHA-256 hash only, shown once |
-| Rate Limiting | 200 req/60s per user (Redis sliding window) |
-| Input Validation | class-validator, whitelist + forbidNonWhitelisted |
-| Webhook Signatures | HMAC-SHA256 per webhook |
-| Stripe Webhooks | `constructEvent()` raw body verification |
-| Edge Auth | Next.js middleware cookie check on all routes |
-| CORS | Explicit origin allowlist via `CORS_ORIGIN` |
-| Container | Non-root users (`nestjs`, `nextjs`) in Docker |
-| Audit Logging | Every admin action logged with actor, IP, timestamp |
+| Concern            | Implementation                                      |
+| ------------------ | --------------------------------------------------- |
+| Authentication     | JWT HS256, 7-day expiry                             |
+| Passwords          | bcrypt rounds=12                                    |
+| API Keys           | SHA-256 hash only, shown once                       |
+| Rate Limiting      | 200 req/60s per user (Redis sliding window)         |
+| Input Validation   | class-validator, whitelist + forbidNonWhitelisted   |
+| Webhook Signatures | HMAC-SHA256 per webhook                             |
+| Stripe Webhooks    | `constructEvent()` raw body verification            |
+| Edge Auth          | Next.js middleware cookie check on all routes       |
+| CORS               | Explicit origin allowlist via `CORS_ORIGIN`         |
+| Container          | Non-root users (`nestjs`, `nextjs`) in Docker       |
+| Audit Logging      | Every admin action logged with actor, IP, timestamp |
 
 ---
 
 ## Integrations
 
-| Integration | Purpose | Setup |
-|-------------|---------|-------|
-| **Shopify** | Order ingestion via webhooks | Set `SHOPIFY_API_SECRET` |
-| **Salesforce** | Audience activation + Data Cloud | OAuth via `/connectors/salesforce/oauth/start` |
-| **Meta CAPI** | Server-side purchase events | Post to `/attribution/server-events` |
-| **Stripe** | Subscriptions + billing portal | Set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` |
-| **Resend** | Transactional email | Set `RESEND_API_KEY` |
-| **PostHog** | Product analytics | Set `POSTHOG_API_KEY` |
-| **Sentry** | Error monitoring | Set `NEXT_PUBLIC_SENTRY_DSN` |
-| **Slack** | Event notifications | Set webhook URL in Org Settings |
-| **Discord** | Event notifications | Set webhook URL in Org Settings |
+| Integration    | Purpose                                        | Setup                                             |
+| -------------- | ---------------------------------------------- | ------------------------------------------------- |
+| **Shopify**    | Order ingestion via webhooks                   | Set `SHOPIFY_API_SECRET`                          |
+| **Salesforce** | Audience activation + Data Cloud               | OAuth via `/connectors/salesforce/oauth/start`    |
+| **Meta CAPI**  | Server-side purchase events                    | Post to `/attribution/server-events`              |
+| **Stripe**     | Subscriptions + billing portal                 | Set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` |
+| **Resend**     | Transactional email + creator onboarding drips | Set `RESEND_API_KEY`                              |
+| **PostHog**    | Product analytics                              | Set `POSTHOG_API_KEY`                             |
+| **Sentry**     | Error monitoring                               | Set `NEXT_PUBLIC_SENTRY_DSN`                      |
+| **Slack**      | Event notifications                            | Set webhook URL in Org Settings                   |
+| **Discord**    | Event notifications                            | Set webhook URL in Org Settings                   |
 
 ---
 

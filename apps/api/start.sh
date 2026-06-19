@@ -11,7 +11,7 @@ if [ -d "$MIGRATIONS_DIR" ] && [ "$(ls -A $MIGRATIONS_DIR 2>/dev/null)" ]; then
   ./node_modules/.bin/prisma migrate deploy --schema="$SCHEMA"
 else
   echo "[startup] No migrations found — running prisma db push (first deploy)..."
-  ./node_modules/.bin/prisma db push --schema="$SCHEMA" --accept-data-loss
+  ./node_modules/.bin/prisma db push --schema="$SCHEMA"
 fi
 
 echo "[startup] Schema ready. Starting API..."

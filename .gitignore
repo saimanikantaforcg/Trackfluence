@@ -23,7 +23,7 @@ out/
 Thumbs.db
 
 # Prisma
-packages/database/prisma/migrations/
+# (migrations/ is committed to git for production-safe deployments)
 
 # Logs
 *.log

@@ -48,7 +48,7 @@ export class AiRecommendationsController {
   @ApiOperation({ summary: "Get cached AI recommendation" })
   async cached(
     @CurrentUser() user: { sub: string },
-    @Path("type") type: string,
+    @Param("type") type: string,
   ) {
     return this.ai.getCachedRecommendation(user.sub, type);
   }

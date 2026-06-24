@@ -7,7 +7,7 @@ import {
   TrackingLinkType,
   InteractionType,
   AttributionModel,
-} from "@prisma/client";
+} from "@trackfluence/database";
 
 @Injectable()
 export class AdminService {

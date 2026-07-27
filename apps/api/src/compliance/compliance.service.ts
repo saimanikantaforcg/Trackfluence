@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { EmailService } from '../email/email.service';
-import { FTCCheckDto } from './dto/compliance.dto';
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { EmailService } from "../email/email.service";
+import { FTCCheckDto } from "./dto/compliance.dto";
 
 const DISCLOSURE_PATTERNS = [
   /#ad\b/i,
@@ -14,9 +14,11 @@ const DISCLOSURE_PATTERNS = [
   /advertisement/i,
 ];
 
-function detectDisclosure(text: string): { found: boolean; type: string | null } {
+function detectDisclosure(
+  text: string,
+): { found: boolean; type: string | null } {
   for (const pattern of DISCLOSURE_PATTERNS) {
-    if (pattern.test(text)) return { found: true, type: 'hashtag' };
+    if (pattern.test(text)) return { found: true, type: "hashtag" };
   }
   return { found: false, type: null };
 }
@@ -28,7 +30,7 @@ export class ComplianceService {
     private readonly email: EmailService,
   ) {}
 
-  async runFTCCheck(dto: FTCCheckDto) {
+  async runFTCCheck(dto: FTCCheckDto, orgId?: string) {
     const issues: string[] = [];
 
     const { found: hasDisclosure, type: disclosureType } = dto.contentText
@@ -36,14 +38,16 @@ export class ComplianceService {
       : { found: false, type: null };
 
     if (dto.hasSponsorship && !hasDisclosure) {
-      issues.push('Missing FTC disclosure for sponsored content');
+      issues.push("Missing FTC disclosure for sponsored content");
     }
 
     if (hasDisclosure && dto.contentText) {
-      const firstLine = dto.contentText.split('\n')[0] ?? '';
+      const firstLine = dto.contentText.split("\n")[0] ?? "";
       const hasEarlyDisclosure = detectDisclosure(firstLine).found;
       if (!hasEarlyDisclosure) {
-        issues.push('Disclosure not prominently placed (should appear early in content)');
+        issues.push(
+          "Disclosure not prominently placed (should appear early in content)",
+        );
       }
     }
 
@@ -58,6 +62,7 @@ export class ComplianceService {
         disclosureType,
         isCompliant,
         issues,
+        organizationId: orgId,
       },
     });
 
@@ -80,21 +85,44 @@ export class ComplianceService {
     return check;
   }
 
-  async getAllCreatorCompliance() {
-    const creators = await this.prisma.creator.findMany({
-      select: { id: true, name: true, platform: true, handle: true },
-      orderBy: { name: 'asc' },
-    });
+  async getAllCreatorCompliance(orgId?: string, page = 1, limit = 50) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+      };
+    }
+    const skip = (page - 1) * limit;
+    const where = { organizationId: orgId };
+
+    const [creators, total] = await Promise.all([
+      this.prisma.creator.findMany({
+        where,
+        select: { id: true, name: true, platform: true, handle: true },
+        orderBy: { name: "asc" },
+        skip,
+        take: limit,
+      }),
+      this.prisma.creator.count({ where }),
+    ]);
 
     const results = await Promise.all(
       creators.map(async (creator) => {
         const [total, compliant] = await Promise.all([
-          this.prisma.fTCComplianceCheck.count({ where: { creatorId: creator.id } }),
-          this.prisma.fTCComplianceCheck.count({ where: { creatorId: creator.id, isCompliant: true } }),
+          this.prisma.fTCComplianceCheck.count({
+            where: { creatorId: creator.id },
+          }),
+          this.prisma.fTCComplianceCheck.count({
+            where: { creatorId: creator.id, isCompliant: true },
+          }),
         ]);
         const lastCheck = await this.prisma.fTCComplianceCheck.findFirst({
           where: { creatorId: creator.id },
-          orderBy: { checkedAt: 'desc' },
+          orderBy: { checkedAt: "desc" },
           select: { checkedAt: true, isCompliant: true },
         });
         return {
@@ -112,13 +140,23 @@ export class ComplianceService {
       }),
     );
 
-    return results;
+    return {
+      items: results,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
-  async getCreatorCompliance(creatorId: string) {
+  async getCreatorCompliance(creatorId: string, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      throw new Error("Organization context required");
+    }
     const checks = await this.prisma.fTCComplianceCheck.findMany({
-      where: { creatorId },
-      orderBy: { checkedAt: 'desc' },
+      where: { creatorId, organizationId: orgId },
+      orderBy: { checkedAt: "desc" },
     });
 
     const compliant = checks.filter((c) => c.isCompliant).length;
@@ -133,14 +171,27 @@ export class ComplianceService {
     };
   }
 
-  async getComplianceSummary() {
+  async getComplianceSummary(orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      return {
+        totalChecks: 0,
+        compliantCount: 0,
+        nonCompliantCount: 0,
+        complianceRate: 0,
+        topIssues: [],
+      };
+    }
+    const where = { organizationId: orgId };
     const [total, compliant] = await Promise.all([
-      this.prisma.fTCComplianceCheck.count(),
-      this.prisma.fTCComplianceCheck.count({ where: { isCompliant: true } }),
+      this.prisma.fTCComplianceCheck.count({ where }),
+      this.prisma.fTCComplianceCheck.count({
+        where: { ...where, isCompliant: true },
+      }),
     ]);
 
     const nonCompliantChecks = await this.prisma.fTCComplianceCheck.findMany({
-      where: { isCompliant: false },
+      where: { ...where, isCompliant: false },
       select: { issues: true },
     });
 

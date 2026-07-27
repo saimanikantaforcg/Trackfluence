@@ -215,19 +215,9 @@ export default function CampaignsClient({ initial }: { initial: CampaignListResp
         </div>
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="mx-auto h-12 w-12 rounded-full bg-indigo-500/10 flex items-center justify-center mb-4">
-            <Megaphone className="h-6 w-6 text-indigo-400" />
-          </div>
-          <p className="text-zinc-300 font-medium">No campaigns yet</p>
-          <p className="text-zinc-500 text-sm mt-1 max-w-xs">Create your first campaign to group creators, set budgets, and track ROI</p>
-          {token && (
-            <button
-              onClick={() => setModal({ open: true })}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
-            >
-              <Plus className="h-4 w-4" /> Create your first campaign
-            </button>
-          )}
+          <Megaphone className="h-12 w-12 text-zinc-600 mb-4" />
+          <p className="text-zinc-400 font-medium">No campaigns yet</p>
+          <p className="text-zinc-600 text-sm mt-1">Create your first campaign to track budgets and performance</p>
         </div>
       ) : (
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">

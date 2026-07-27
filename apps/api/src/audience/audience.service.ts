@@ -1,10 +1,20 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateAudienceDto, ExportAudienceDto } from './dto/audience.dto';
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  BadRequestException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateAudienceDto, ExportAudienceDto } from "./dto/audience.dto";
 
 type AudienceRule = {
-  field: 'creatorAcquired' | 'totalRevenue' | 'orderCount' | 'creatorId' | 'channel';
-  operator: 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte';
+  field:
+    | "creatorAcquired"
+    | "totalRevenue"
+    | "orderCount"
+    | "creatorId"
+    | "channel";
+  operator: "eq" | "neq" | "gt" | "lt" | "gte" | "lte";
   value: unknown;
 };
 
@@ -14,60 +24,97 @@ export class AudienceService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async createAudience(dto: CreateAudienceDto) {
+  async createAudience(dto: CreateAudienceDto, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped creation
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to create an audience",
+      );
+    }
     return this.prisma.audience.create({
       data: {
         name: dto.name,
         description: dto.description,
         rules: dto.rules as any,
+        organizationId: orgId,
       },
     });
   }
 
-  async listAudiences() {
+  async listAudiences(orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      return [];
+    }
     return this.prisma.audience.findMany({
-      orderBy: { createdAt: 'desc' },
+      where: { organizationId: orgId },
+      orderBy: { createdAt: "desc" },
       include: { _count: { select: { members: true } } },
     });
   }
 
-  async getAudience(id: string) {
+  async getAudience(id: string, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      throw new NotFoundException("Audience not found");
+    }
     const audience = await this.prisma.audience.findUnique({
-      where: { id },
+      where: { id, organizationId: orgId },
       include: {
         members: {
-          include: { customer: { select: { id: true, email: true, firstName: true, lastName: true } } },
+          include: {
+            customer: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
           take: 100,
         },
         _count: { select: { members: true } },
       },
     });
-    if (!audience) throw new NotFoundException('Audience not found');
+    if (!audience) throw new NotFoundException("Audience not found");
     return audience;
   }
 
-  async computeAudience(id: string) {
-    const audience = await this.prisma.audience.findUnique({ where: { id } });
-    if (!audience) throw new NotFoundException('Audience not found');
+  async computeAudience(id: string, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped operations
+    if (!orgId) {
+      throw new NotFoundException("Audience not found");
+    }
+    const audience = await this.prisma.audience.findUnique({
+      where: { id, organizationId: orgId },
+    });
+    if (!audience) throw new NotFoundException("Audience not found");
 
-    const rules = (audience.rules as unknown as AudienceRule[]) ?? [];
-    const where: Record<string, unknown> = {};
+    const rules = ((audience.rules as unknown) as AudienceRule[]) ?? [];
+    const where: Record<string, unknown> = {
+      organizationId: orgId,
+    };
 
     for (const rule of rules) {
-      if (rule.field === 'creatorAcquired') {
-        where['creatorAcquired'] = rule.value === true || rule.value === 'true';
-      } else if (rule.field === 'totalRevenue') {
-        where['totalRevenue'] = { [this.operatorToPrisma(rule.operator)]: Number(rule.value) };
-      } else if (rule.field === 'orderCount') {
-        where['orderCount'] = { [this.operatorToPrisma(rule.operator)]: Number(rule.value) };
-      } else if (rule.field === 'creatorId') {
+      if (rule.field === "creatorAcquired") {
+        where["creatorAcquired"] = rule.value === true || rule.value === "true";
+      } else if (rule.field === "totalRevenue") {
+        where["totalRevenue"] = {
+          [this.operatorToPrisma(rule.operator)]: Number(rule.value),
+        };
+      } else if (rule.field === "orderCount") {
+        where["orderCount"] = {
+          [this.operatorToPrisma(rule.operator)]: Number(rule.value),
+        };
+      } else if (rule.field === "creatorId") {
         // Customers acquired via a specific creator
-        const prismaOp = rule.operator === 'neq' ? 'not' : 'equals';
-        where['acquiredByCreatorId'] = { [prismaOp]: String(rule.value) };
-      } else if (rule.field === 'channel') {
+        const prismaOp = rule.operator === "neq" ? "not" : "equals";
+        where["acquiredByCreatorId"] = { [prismaOp]: String(rule.value) };
+      } else if (rule.field === "channel") {
         // Customers whose first touchpoint had a matching UTM source
-        const prismaOp = rule.operator === 'neq' ? 'not' : 'equals';
-        where['touchpoints'] = {
+        const prismaOp = rule.operator === "neq" ? "not" : "equals";
+        where["touchpoints"] = {
           some: {
             utmSource: { [prismaOp]: String(rule.value) },
           },
@@ -103,7 +150,7 @@ export class AudienceService {
 
   async deleteAudience(id: string) {
     const audience = await this.prisma.audience.findUnique({ where: { id } });
-    if (!audience) throw new NotFoundException('Audience not found');
+    if (!audience) throw new NotFoundException("Audience not found");
     await this.prisma.audience.delete({ where: { id } });
   }
 
@@ -112,13 +159,13 @@ export class AudienceService {
       where: { id },
       include: { _count: { select: { members: true } } },
     });
-    if (!audience) throw new NotFoundException('Audience not found');
+    if (!audience) throw new NotFoundException("Audience not found");
 
     const exportRecord = await this.prisma.audienceExport.create({
       data: {
         audienceId: id,
         destination: dto.destination,
-        status: 'PENDING',
+        status: "PENDING",
       },
     });
 
@@ -129,7 +176,7 @@ export class AudienceService {
       exportId: exportRecord.id,
       audienceId: id,
       destination: dto.destination,
-      status: 'PENDING',
+      status: "PENDING",
       estimatedRecords: audience._count.members,
     };
   }
@@ -141,32 +188,49 @@ export class AudienceService {
         members: {
           include: {
             customer: {
-              select: { id: true, email: true, firstName: true, lastName: true, totalRevenue: true, orderCount: true, creatorAcquired: true },
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                totalRevenue: true,
+                orderCount: true,
+                creatorAcquired: true,
+              },
             },
           },
         },
       },
     });
-    if (!audience) throw new NotFoundException('Audience not found');
+    if (!audience) throw new NotFoundException("Audience not found");
 
-    const header = 'customerId,email,firstName,lastName,totalRevenue,orderCount,creatorAcquired\n';
+    const header =
+      "customerId,email,firstName,lastName,totalRevenue,orderCount,creatorAcquired\n";
     const rows = audience.members
       .map(({ customer: c }) =>
-        [c.id, c.email, c.firstName ?? '', c.lastName ?? '', c.totalRevenue, c.orderCount, c.creatorAcquired].join(','),
+        [
+          c.id,
+          c.email,
+          c.firstName ?? "",
+          c.lastName ?? "",
+          c.totalRevenue,
+          c.orderCount,
+          c.creatorAcquired,
+        ].join(","),
       )
-      .join('\n');
+      .join("\n");
     return header + rows;
   }
 
   private operatorToPrisma(operator: string): string {
     const map: Record<string, string> = {
-      eq: 'equals',
-      neq: 'not',
-      gt: 'gt',
-      lt: 'lt',
-      gte: 'gte',
-      lte: 'lte',
+      eq: "equals",
+      neq: "not",
+      gt: "gt",
+      lt: "lt",
+      gte: "gte",
+      lte: "lte",
     };
-    return map[operator] ?? 'equals';
+    return map[operator] ?? "equals";
   }
 }

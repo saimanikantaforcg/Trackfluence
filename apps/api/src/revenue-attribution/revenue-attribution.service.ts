@@ -1,9 +1,13 @@
-import { Injectable, NotFoundException, Logger } from "@nestjs/common";
-import { InjectQueue } from "@nestjs/bullmq";
-import { Queue } from "bullmq";
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  ForbiddenException,
+  BadRequestException,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { WebhooksService } from "../webhooks/webhooks.service";
-import { ATTRIBUTION_QUEUE } from "../queue/queue.module";
 
 export type AttributionModelType =
   | "FIRST_TOUCH"
@@ -30,11 +34,21 @@ export class RevenueAttributionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhooks: WebhooksService,
-    @InjectQueue(ATTRIBUTION_QUEUE) private readonly attributionQueue: Queue,
+    private readonly config: ConfigService,
   ) {}
 
-  async calculateAttribution(orderId: string, rawModel?: string) {
+  async calculateAttribution(
+    orderId: string,
+    rawModel?: string,
+    orgId?: string,
+  ) {
+    // Fail closed: require orgId for tenant-scoped operations
+    if (!orgId) {
+      throw new NotFoundException("Order not found");
+    }
     const model = resolveModel(rawModel);
+
+    // Scope order lookup through Customer.organizationId since Order lacks direct orgId
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -50,6 +64,11 @@ export class RevenueAttributionService {
     });
 
     if (!order) throw new NotFoundException("Order not found");
+
+    // Enforce tenant ownership: verify the order's customer belongs to the current org
+    if (order.customer.organizationId !== orgId) {
+      throw new NotFoundException("Order not found");
+    }
 
     const touchpoints = order.customer.touchpoints;
     if (touchpoints.length === 0) {
@@ -119,6 +138,9 @@ export class RevenueAttributionService {
     }
 
     // Persist attribution results
+    // Note: Attribution model lacks organizationId; tenant ownership is enforced
+    // through the order -> customer relationship verified above.
+    // TODO (Phase 2): Add organizationId to Attribution model for direct scoping.
     const results = await Promise.all(
       attributions.map((a) =>
         this.prisma.attribution.create({
@@ -139,35 +161,37 @@ export class RevenueAttributionService {
       ),
     );
 
-    void this.webhooks.dispatch("attribution.created", {
-      orderId,
-      model,
-      count: results.length,
-      totalRevenue,
-    });
+    void this.webhooks.dispatch(
+      "attribution.created",
+      {
+        orderId,
+        model,
+        count: results.length,
+        totalRevenue,
+      },
+      orgId,
+    );
 
     return { orderId, model, attributions: results };
   }
 
-  async calculateAttributionAsync(
-    orderId: string,
-    rawModel?: string,
-  ): Promise<{ queued: true; orderId: string; model: string }> {
-    const model = resolveModel(rawModel);
-    await this.attributionQueue.add(
-      "calculate",
-      { orderId, rawModel: model },
-      {
-        jobId: `attr-${orderId}-${model}`,
-      },
-    );
-    this.logger.log(
-      `Queued attribution job: orderId=${orderId}, model=${model}`,
-    );
-    return { queued: true, orderId, model };
-  }
+  async getOrderAttribution(orderId: string, orgId: string) {
+    // Fail closed: require orgId
+    if (!orgId) {
+      throw new NotFoundException("Attribution not found");
+    }
 
-  async getOrderAttribution(orderId: string) {
+    // Scope through Order -> Customer.organizationId since Attribution lacks direct orgId
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: { select: { organizationId: true } } },
+    });
+
+    if (!order) throw new NotFoundException("Attribution not found");
+    if (order.customer.organizationId !== orgId) {
+      throw new NotFoundException("Attribution not found");
+    }
+
     return this.prisma.attribution.findMany({
       where: { orderId },
       include: {
@@ -179,11 +203,30 @@ export class RevenueAttributionService {
 
   async getCreatorAttribution(
     creatorId: string,
+    orgId: string,
     dateRange: { from?: Date; to?: Date },
     rawModel?: string,
   ) {
+    // Fail closed: require orgId
+    if (!orgId) {
+      throw new NotFoundException("Creator not found");
+    }
+
+    // Enforce tenant ownership: verify the creator belongs to the current org
+    const creator = await this.prisma.creator.findUnique({
+      where: { id: creatorId },
+      select: { organizationId: true },
+    });
+
+    if (!creator) throw new NotFoundException("Creator not found");
+    if (creator.organizationId !== orgId) {
+      throw new NotFoundException("Creator not found");
+    }
+
     const model = rawModel ? resolveModel(rawModel) : undefined;
-    const where: Record<string, unknown> = { creatorId };
+    const where: Record<string, unknown> = {
+      creatorId,
+    };
     if (model) where["model"] = model;
     if (dateRange.from || dateRange.to) {
       where["calculatedAt"] = {
@@ -212,5 +255,15 @@ export class RevenueAttributionService {
       orderCount: new Set(attributions.map((a) => a.orderId)).size,
       attributions,
     };
+  }
+
+  async calculateAttributionAsync(orderId: string, rawModel?: string) {
+    // DISABLED for Phase 1A: Async attribution queue path lacks tenant scoping.
+    // The synchronous calculateAttribution() handles all current attribution needs
+    // with full orgId validation and tenant ownership verification.
+    // Re-enable in Phase 2 with orgId parameter and tenant-scoped job processing.
+    throw new BadRequestException(
+      "Async attribution is disabled pending Phase 2 tenant-scope hardening. Use calculateAttribution() synchronously instead.",
+    );
   }
 }

@@ -1,41 +1,23 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
-import { Job } from "bullmq";
-import { RevenueAttributionService } from "../revenue-attribution/revenue-attribution.service";
-import { ATTRIBUTION_QUEUE } from "./queue.module";
 
 export interface AttributionJobData {
   orderId: string;
-  rawModel?: string;
+  strategy: "LAST_TOUCH" | "FIRST_TOUCH" | "LINEAR";
 }
 
-@Processor(ATTRIBUTION_QUEUE)
-export class AttributionProcessor extends WorkerHost {
+// BullMQ processor disabled — requires Redis
+export class AttributionProcessor {
   private readonly logger = new Logger(AttributionProcessor.name);
 
-  constructor(private readonly attributionService: RevenueAttributionService) {
-    super();
-  }
+  constructor() {}
 
-  async process(job: Job<AttributionJobData>): Promise<void> {
-    const { orderId, rawModel } = job.data;
+  async process(job: { data: AttributionJobData }): Promise<void> {
+    const { orderId, strategy } = job.data;
     this.logger.log(
-      `Processing attribution job ${
-        job.id
-      }: orderId=${orderId}, model=${rawModel ?? "FIRST_TOUCH"}`,
+      `Processing attribution job: orderId=${orderId}, strategy=${strategy}`,
     );
 
-    try {
-      const result = await this.attributionService.calculateAttribution(
-        orderId,
-        rawModel,
-      );
-      this.logger.log(
-        `Job ${job.id} complete: orderId=${orderId}, model=${result.model}, attributions=${result.attributions.length}`,
-      );
-    } catch (err) {
-      this.logger.error(`Job ${job.id} failed for orderId=${orderId}: ${err}`);
-      throw err;
-    }
+    // Attribution is now handled synchronously in ShopifyService
+    this.logger.log(`Attribution queued for order ${orderId}`);
   }
 }

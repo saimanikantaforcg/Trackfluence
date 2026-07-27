@@ -1,12 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { createHash, randomBytes } from 'crypto';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { createHash, randomBytes } from "crypto";
+import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
 export class ApiKeysService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async generate(userId: string, name: string, scopes: string[] = ['read']): Promise<{
+  async generate(
+    userId: string,
+    name: string,
+    scopes: string[] = ["read"],
+    orgId?: string,
+  ): Promise<{
     key: string; // shown ONCE
     id: string;
     prefix: string;
@@ -15,12 +20,21 @@ export class ApiKeysService {
     createdAt: Date;
   }> {
     // Generate 32-byte random key, encode as hex → 64 chars
-    const rawKey = `tf_${randomBytes(32).toString('hex')}`;
-    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+    const rawKey = `tf_${randomBytes(32).toString("hex")}`;
+    const keyHash = createHash("sha256")
+      .update(rawKey)
+      .digest("hex");
     const keyPrefix = rawKey.slice(0, 10); // "tf_" + 7 chars
 
     const record = await this.prisma.apiKey.create({
-      data: { userId, name, keyHash, keyPrefix, scopes },
+      data: {
+        userId,
+        name,
+        keyHash,
+        keyPrefix,
+        scopes,
+        organizationId: orgId ?? null,
+      },
     });
 
     return {
@@ -45,7 +59,7 @@ export class ApiKeysService {
         expiresAt: true,
         createdAt: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
   }
 
@@ -53,7 +67,7 @@ export class ApiKeysService {
     const key = await this.prisma.apiKey.findFirst({
       where: { id: keyId, userId, revokedAt: null },
     });
-    if (!key) throw new NotFoundException('API key not found');
+    if (!key) throw new NotFoundException("API key not found");
 
     await this.prisma.apiKey.update({
       where: { id: keyId },
@@ -62,8 +76,12 @@ export class ApiKeysService {
   }
 
   /** Called by an API-key auth guard to validate an inbound key */
-  async validateKey(rawKey: string): Promise<{ userId: string; scopes: string[] } | null> {
-    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+  async validateKey(
+    rawKey: string,
+  ): Promise<{ userId: string; scopes: string[] } | null> {
+    const keyHash = createHash("sha256")
+      .update(rawKey)
+      .digest("hex");
     const record = await this.prisma.apiKey.findUnique({ where: { keyHash } });
 
     if (!record || record.revokedAt) return null;

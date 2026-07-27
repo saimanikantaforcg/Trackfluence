@@ -3,4 +3,5 @@
 # and use the current state of your schema directory to generate a new migration.
 
 [prisma-migrate]
+provider = "postgresql"
 id = "0_init"

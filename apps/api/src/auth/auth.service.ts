@@ -32,16 +32,69 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, passwordHash },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        passwordHash,
+        organizations: {
+          create: {
+            role: 'ADMIN',
+            organization: {
+              create: {
+                name: `${dto.name}'s Organization`,
+                slug:
+                  dto.email.split('@')[0] +
+                  '-' +
+                  crypto.randomBytes(4).toString('hex'),
+              },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        currentOrganizationId: true,
+        createdAt: true,
+      },
     });
+
+    // Set currentOrganizationId to the newly created org
+    const membership = await this.prisma.organizationMember.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (membership && !user.currentOrganizationId) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { currentOrganizationId: membership.organizationId },
+      });
+      user.currentOrganizationId = membership.organizationId;
+    }
 
     // Fire-and-forget — don't block registration if email fails
     void this.email.sendWelcome(user.email, user.name);
-    this.analytics.track(user.id, 'user.registered', { email: user.email, name: user.name });
-    this.analytics.identify(user.id, { email: user.email, name: user.name, role: user.role });
+    this.analytics.track(user.id, 'user.registered', {
+      email: user.email,
+      name: user.name,
+    });
+    this.analytics.identify(user.id, {
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
 
-    return { user, token: this.sign(user.id, user.email, user.role) };
+    return {
+      user,
+      token: this.sign(
+        user.id,
+        user.email,
+        user.role,
+        user.currentOrganizationId ?? undefined,
+      ),
+    };
   }
 
   async login(dto: LoginDto) {
@@ -56,15 +109,33 @@ export class AuthService {
     this.analytics.track(user.id, 'user.login', { email: user.email });
 
     return {
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      token: this.sign(user.id, user.email, user.role),
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        currentOrganizationId: user.currentOrganizationId,
+      },
+      token: this.sign(
+        user.id,
+        user.email,
+        user.role,
+        user.currentOrganizationId,
+      ),
     };
   }
 
   async me(userId: string) {
     return this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        currentOrganizationId: true,
+        createdAt: true,
+      },
     });
   }
 
@@ -118,8 +189,8 @@ export class AuthService {
     ]);
   }
 
-  private sign(sub: string, email: string, role: string) {
-    const payload: JwtPayload = { sub, email, role };
+  private sign(sub: string, email: string, role: string, orgId?: string) {
+    const payload: JwtPayload = { sub, email, role, organizationId: orgId };
     return this.jwt.sign(payload);
   }
 }

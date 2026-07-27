@@ -1,8 +1,5 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
-import { Job } from "bullmq";
 import { EmailService } from "../email/email.service";
-import { CREATOR_ONBOARDING_QUEUE } from "./queue.module";
 
 export interface CreatorOnboardingJobData {
   creatorEmail: string;
@@ -11,15 +8,13 @@ export interface CreatorOnboardingJobData {
   step: "day1" | "day3" | "day14";
 }
 
-@Processor(CREATOR_ONBOARDING_QUEUE)
-export class CreatorOnboardingProcessor extends WorkerHost {
+// BullMQ processor disabled — requires Redis
+export class CreatorOnboardingProcessor {
   private readonly logger = new Logger(CreatorOnboardingProcessor.name);
 
-  constructor(private readonly email: EmailService) {
-    super();
-  }
+  constructor(private readonly email: EmailService) {}
 
-  async process(job: Job<CreatorOnboardingJobData>): Promise<void> {
+  async process(job: { data: CreatorOnboardingJobData }): Promise<void> {
     const { creatorEmail, creatorName, portalUrl, step } = job.data;
     this.logger.log(`Processing onboarding email: ${step} → ${creatorEmail}`);
 

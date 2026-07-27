@@ -27,9 +27,6 @@ import { CurrentOrg } from "../organizations/current-org.decorator";
 import { randomBytes } from "crypto";
 import { Request } from "express";
 import { Public } from "../auth/public.decorator";
-import { InjectQueue } from "@nestjs/bullmq";
-import { Queue } from "bullmq";
-import { CREATOR_ONBOARDING_QUEUE } from "../queue/queue.module";
 
 interface AuthedRequest extends Request {
   user: { sub: string; role: string };
@@ -67,47 +64,88 @@ export class CreatorsController {
     private readonly email: EmailService,
     private readonly notif: NotificationsService,
     private readonly webhooks: WebhooksService,
-    @InjectQueue(CREATOR_ONBOARDING_QUEUE)
-    private readonly onboardingQueue: Queue,
   ) {}
 
   @Get()
   @ApiOperation({ summary: "List all creators" })
   async findAll(
     @Query("search") search?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
     @CurrentOrg() orgId?: string,
   ) {
-    return this.prisma.creator.findMany({
-      where: {
-        ...(orgId ? { organizationId: orgId } : {}),
-        ...(search
-          ? {
-              OR: [
-                { name: { contains: search, mode: "insensitive" } },
-                { handle: { contains: search, mode: "insensitive" } },
-                { email: { contains: search, mode: "insensitive" } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        platform: true,
-        handle: true,
-        avatarUrl: true,
-        createdAt: true,
-        _count: { select: { trackingLinks: true, attributions: true } },
-      },
-    });
+    const pageNum = Math.max(1, parseInt(page ?? "1", 10) || 1);
+    const limitNum = Math.min(
+      200,
+      Math.max(1, parseInt(limit ?? "50", 10) || 50),
+    );
+    const skip = (pageNum - 1) * limitNum;
+
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      return {
+        items: [],
+        total: 0,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: 0,
+      };
+    }
+
+    const where: Record<string, unknown> = {
+      organizationId: orgId,
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { handle: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.creator.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limitNum,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          platform: true,
+          handle: true,
+          avatarUrl: true,
+          createdAt: true,
+          _count: { select: { trackingLinks: true, attributions: true } },
+        },
+      }),
+      this.prisma.creator.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+    };
   }
 
   @Post()
   @ApiOperation({ summary: "Create a creator" })
-  async create(@Body() dto: CreateCreatorDto) {
-    const creator = await this.prisma.creator.create({ data: dto });
+  async create(@Body() dto: CreateCreatorDto, @CurrentOrg() orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped creation
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to create a creator",
+      );
+    }
+    const creator = await this.prisma.creator.create({
+      data: { ...dto, organizationId: orgId },
+    });
     // fire-and-forget audit
     void this.notif.notify({
       userId: "system",
@@ -116,13 +154,17 @@ export class CreatorsController {
       body: `Creator "${creator.name}" was added to Trackfluence.`,
       link: `/creators/${creator.id}`,
     });
-    void this.webhooks.dispatch("creator.created", {
-      id: creator.id,
-      name: creator.name,
-      email: creator.email,
-      platform: creator.platform,
-      handle: creator.handle,
-    });
+    void this.webhooks.dispatch(
+      "creator.created",
+      {
+        id: creator.id,
+        name: creator.name,
+        email: creator.email,
+        platform: creator.platform,
+        handle: creator.handle,
+      },
+      orgId,
+    );
     return creator;
   }
 
@@ -222,9 +264,15 @@ export class CreatorsController {
 
   @Get(":id")
   @ApiOperation({ summary: "Get creator by ID" })
-  async findOne(@Param("id") id: string) {
+  async findOne(@Param("id") id: string, @CurrentOrg() orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to view creator details",
+      );
+    }
     return this.prisma.creator.findUniqueOrThrow({
-      where: { id },
+      where: { id, organizationId: orgId },
       include: {
         trackingLinks: { orderBy: { createdAt: "desc" }, take: 10 },
         _count: { select: { attributions: true, touchpoints: true } },
@@ -237,9 +285,16 @@ export class CreatorsController {
   async updateCommission(
     @Param("id") id: string,
     @Body() dto: UpdateCommissionDto,
+    @CurrentOrg() orgId?: string,
   ) {
+    // Fail closed: require orgId for tenant-scoped updates
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to update creator",
+      );
+    }
     return this.prisma.creator.update({
-      where: { id },
+      where: { id, organizationId: orgId },
       data: { commissionRate: dto.commissionRate },
       select: { id: true, name: true, commissionRate: true },
     });
@@ -247,7 +302,11 @@ export class CreatorsController {
 
   @Post(":id/invite")
   @ApiOperation({ summary: "Send invite email to creator" })
-  async invite(@Param("id") id: string, @Req() req: AuthedRequest) {
+  async invite(
+    @Param("id") id: string,
+    @Req() req: AuthedRequest,
+    @CurrentOrg() orgId?: string,
+  ) {
     const creator = await this.prisma.creator.findUnique({ where: { id } });
     if (!creator) throw new BadRequestException("Creator not found");
     if (!creator.email)
@@ -280,36 +339,6 @@ export class CreatorsController {
       inviteUrl,
     );
 
-    // Queue onboarding drip emails: day 1, day 3, day 14
-    const delayDay3 = 3 * 24 * 60 * 60 * 1000;
-    const delayDay14 = 14 * 24 * 60 * 60 * 1000;
-    void this.onboardingQueue.add("day1", {
-      creatorEmail: creator.email,
-      creatorName: creator.name,
-      portalUrl: inviteUrl,
-      step: "day1",
-    });
-    void this.onboardingQueue.add(
-      "day3",
-      {
-        creatorEmail: creator.email,
-        creatorName: creator.name,
-        portalUrl: inviteUrl,
-        step: "day3",
-      },
-      { delay: delayDay3 },
-    );
-    void this.onboardingQueue.add(
-      "day14",
-      {
-        creatorEmail: creator.email,
-        creatorName: creator.name,
-        portalUrl: inviteUrl,
-        step: "day14",
-      },
-      { delay: delayDay14 },
-    );
-
     void this.notif.notify({
       userId: req.user.sub,
       type: "creator.invited",
@@ -317,11 +346,15 @@ export class CreatorsController {
       body: `Invite sent to ${creator.name} (${creator.email}).`,
       link: `/creators/${id}`,
     });
-    void this.webhooks.dispatch("creator.invited", {
-      creatorId: id,
-      email: creator.email,
-      invitedBy: req.user.sub,
-    });
+    void this.webhooks.dispatch(
+      "creator.invited",
+      {
+        creatorId: id,
+        email: creator.email,
+        invitedBy: req.user.sub,
+      },
+      orgId,
+    );
 
     return { invited: true, email: creator.email };
   }
@@ -330,7 +363,10 @@ export class CreatorsController {
   @ApiOperation({
     summary: "Bulk import creators from CSV text (name,email,handle,platform)",
   })
-  async bulkImport(@Body() body: { csv: string }) {
+  async bulkImport(
+    @Body() body: { csv: string },
+    @CurrentOrg() orgId?: string,
+  ) {
     if (!body.csv?.trim())
       throw new BadRequestException("csv field is required");
 
@@ -381,7 +417,13 @@ export class CreatorsController {
         await this.prisma.creator.upsert({
           where: { email: email ?? "" },
           update: { name, handle, platform },
-          create: { name, email, handle, platform },
+          create: {
+            name,
+            email,
+            handle,
+            platform,
+            organizationId: orgId ?? null,
+          },
         });
         results.created++;
       } catch {

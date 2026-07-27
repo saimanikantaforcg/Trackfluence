@@ -1,12 +1,22 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { ResolveIdentityDto, CreateCustomerDto } from './dto/identity.dto';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { ResolveIdentityDto, CreateCustomerDto } from "./dto/identity.dto";
 
 @Injectable()
 export class IdentityService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async resolveIdentity(dto: ResolveIdentityDto) {
+  async resolveIdentity(dto: ResolveIdentityDto, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped operations
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to resolve identity",
+      );
+    }
     // Try to find existing customer by any provided identity
     for (const identity of dto.identities) {
       const existing = await this.prisma.customerIdentity.findUnique({
@@ -53,13 +63,16 @@ export class IdentityService {
     }
 
     // No existing customer found — create new
-    const emailIdentity = dto.identities.find((i) => i.identityType === 'EMAIL');
+    const emailIdentity = dto.identities.find(
+      (i) => i.identityType === "EMAIL",
+    );
 
     const customer = await this.prisma.customer.create({
       data: {
         email: emailIdentity?.identityValue,
         firstName: dto.firstName,
         lastName: dto.lastName,
+        organizationId: orgId,
         identities: {
           create: dto.identities.map((i) => ({
             identityType: i.identityType as any,
@@ -77,7 +90,13 @@ export class IdentityService {
     };
   }
 
-  async createCustomer(dto: CreateCustomerDto) {
+  async createCustomer(dto: CreateCustomerDto, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped creation
+    if (!orgId) {
+      throw new BadRequestException(
+        "Organization context required to create a customer",
+      );
+    }
     return this.prisma.customer.create({
       data: {
         email: dto.email,
@@ -87,13 +106,14 @@ export class IdentityService {
         lastName: dto.lastName,
         creatorAcquired: !!dto.acquisitionCreatorId,
         acquisitionCreatorId: dto.acquisitionCreatorId,
+        organizationId: orgId,
         identities: {
           create: [
             ...(dto.email
-              ? [{ identityType: 'EMAIL' as const, identityValue: dto.email }]
+              ? [{ identityType: "EMAIL" as const, identityValue: dto.email }]
               : []),
             ...(dto.phone
-              ? [{ identityType: 'PHONE' as const, identityValue: dto.phone }]
+              ? [{ identityType: "PHONE" as const, identityValue: dto.phone }]
               : []),
           ],
         },
@@ -102,36 +122,56 @@ export class IdentityService {
     });
   }
 
-  async getCustomerProfile(id: string) {
+  async getCustomerProfile(id: string, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      throw new NotFoundException("Customer not found");
+    }
     const customer = await this.prisma.customer.findUnique({
-      where: { id },
+      where: { id, organizationId: orgId },
       include: {
         identities: true,
         touchpoints: {
           include: { creator: { select: { id: true, name: true } } },
-          orderBy: { timestamp: 'desc' },
+          orderBy: { timestamp: "desc" },
           take: 20,
         },
-        orders: { orderBy: { orderDate: 'desc' }, take: 10 },
+        orders: { orderBy: { orderDate: "desc" }, take: 10 },
       },
     });
-    if (!customer) throw new NotFoundException('Customer not found');
+    if (!customer) throw new NotFoundException("Customer not found");
     return customer;
   }
 
-  async searchCustomers(filters: {
-    email?: string;
-    creatorAcquired?: boolean;
-    segment?: string;
-    page?: number;
-    limit?: number;
-  }) {
+  async searchCustomers(
+    filters: {
+      email?: string;
+      creatorAcquired?: boolean;
+      segment?: string;
+      page?: number;
+      limit?: number;
+    },
+    orgId?: string,
+  ) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      return {
+        customers: [],
+        total: 0,
+        page: filters.page ?? 1,
+        limit: Math.min(filters.limit ?? 50, 200),
+        totalPages: 0,
+      };
+    }
     const page = filters.page ?? 1;
     const limit = Math.min(filters.limit ?? 50, 200);
     const skip = (page - 1) * limit;
 
     const where = {
-      ...(filters.email && { email: { contains: filters.email, mode: 'insensitive' as const } }),
+      organizationId: orgId,
+      ...(filters.email && {
+        email: { contains: filters.email, mode: "insensitive" as const },
+      }),
       ...(filters.creatorAcquired !== undefined && {
         creatorAcquired: filters.creatorAcquired,
       }),
@@ -141,26 +181,36 @@ export class IdentityService {
       this.prisma.customer.findMany({
         where,
         include: { identities: true },
-        orderBy: { lastSeenAt: 'desc' },
+        orderBy: { lastSeenAt: "desc" },
         skip,
         take: limit,
       }),
       this.prisma.customer.count({ where }),
     ]);
 
-    return { customers, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      customers,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
-  async getIdentityGraph(customerId: string) {
+  async getIdentityGraph(customerId: string, orgId?: string) {
+    // Fail closed: require orgId for tenant-scoped queries
+    if (!orgId) {
+      throw new NotFoundException("Customer not found");
+    }
     const customer = await this.prisma.customer.findUnique({
-      where: { id: customerId },
+      where: { id: customerId, organizationId: orgId },
       include: {
         identities: true,
         touchpoints: true,
         orders: true,
       },
     });
-    if (!customer) throw new NotFoundException('Customer not found');
+    if (!customer) throw new NotFoundException("Customer not found");
 
     return {
       customerId: customer.id,

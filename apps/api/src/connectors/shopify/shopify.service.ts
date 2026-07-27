@@ -2,7 +2,6 @@ import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHmac } from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
-import { RevenueAttributionService } from "../../revenue-attribution/revenue-attribution.service";
 
 // Shopify order payload (simplified)
 interface ShopifyOrder {
@@ -32,7 +31,6 @@ export class ShopifyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly attributionService: RevenueAttributionService,
   ) {}
 
   // ─── HMAC Verification ────────────────────────────────────
@@ -54,7 +52,11 @@ export class ShopifyService {
 
   // ─── Webhook: orders/paid ─────────────────────────────────
 
-  async handleOrderPaid(shopDomain: string, order: ShopifyOrder) {
+  async handleOrderPaid(
+    shopDomain: string,
+    order: ShopifyOrder,
+    orgId?: string,
+  ) {
     this.logger.log(
       `Shopify order/paid: #${order.order_number} from ${shopDomain}`,
     );
@@ -64,48 +66,72 @@ export class ShopifyService {
     // Upsert customer via identity resolution
     let customerId: string | null = null;
     if (order.customer) {
-      const customer = await this.prisma.customer.upsert({
-        where: {
-          email:
-            order.customer.email ??
-            `shopify-${order.customer.id}@placeholder.local`,
-        },
-        update: {
-          orderCount: { increment: 1 },
-          totalRevenue: { increment: parseFloat(order.total_price) },
-        },
-        create: {
-          email: order.customer.email,
-          firstName: order.customer.first_name,
-          lastName: order.customer.last_name,
-          orderCount: 1,
-          totalRevenue: parseFloat(order.total_price),
-          identities: {
-            create: [
-              ...(order.customer.email
-                ? [
-                    {
-                      identityType: "EMAIL" as const,
-                      identityValue: order.customer.email,
-                    },
-                  ]
-                : []),
-              ...(order.customer.phone
-                ? [
-                    {
-                      identityType: "PHONE" as const,
-                      identityValue: order.customer.phone,
-                    },
-                  ]
-                : []),
-              {
-                identityType: "SHOPIFY_ID" as const,
-                identityValue: String(order.customer.id),
+      // Use email if available, otherwise use externalId-based lookup
+      const customerEmail = order.customer.email;
+      const customer = customerEmail
+        ? await this.prisma.customer.upsert({
+            where: { email: customerEmail },
+            update: {
+              orderCount: { increment: 1 },
+              totalRevenue: { increment: parseFloat(order.total_price) },
+            },
+            create: {
+              email: order.customer.email,
+              firstName: order.customer.first_name,
+              lastName: order.customer.last_name,
+              orderCount: 1,
+              totalRevenue: parseFloat(order.total_price),
+              organizationId: orgId ?? null,
+              identities: {
+                create: [
+                  ...(order.customer.phone
+                    ? [
+                        {
+                          identityType: "PHONE" as const,
+                          identityValue: order.customer.phone,
+                        },
+                      ]
+                    : []),
+                  {
+                    identityType: "SHOPIFY_ID" as const,
+                    identityValue: String(order.customer.id),
+                  },
+                ],
               },
-            ],
-          },
-        },
-      });
+            },
+          })
+        : // No email — use externalId to avoid placeholder records
+          await this.prisma.customer.upsert({
+            where: { externalId: `shopify-${order.customer.id}` },
+            update: {
+              orderCount: { increment: 1 },
+              totalRevenue: { increment: parseFloat(order.total_price) },
+            },
+            create: {
+              externalId: `shopify-${order.customer.id}`,
+              firstName: order.customer.first_name,
+              lastName: order.customer.last_name,
+              orderCount: 1,
+              totalRevenue: parseFloat(order.total_price),
+              organizationId: orgId ?? null,
+              identities: {
+                create: [
+                  ...(order.customer.phone
+                    ? [
+                        {
+                          identityType: "PHONE" as const,
+                          identityValue: order.customer.phone,
+                        },
+                      ]
+                    : []),
+                  {
+                    identityType: "SHOPIFY_ID" as const,
+                    identityValue: String(order.customer.id),
+                  },
+                ],
+              },
+            },
+          });
       customerId = customer.id;
     }
 
@@ -121,6 +147,7 @@ export class ShopifyService {
         status: this.mapStatus(order.financial_status),
         source: "shopify",
         orderDate: new Date(order.created_at),
+        organizationId: orgId ?? null,
         metadata: { shopDomain, orderNumber: order.order_number },
       },
     });
@@ -138,11 +165,18 @@ export class ShopifyService {
         });
 
         if (!existing) {
-          // Queue attribution asynchronously via BullMQ instead of blocking the webhook
-          await this.attributionService.calculateAttributionAsync(
-            dbOrder.id,
-            "LAST_TOUCH",
-          );
+          await this.prisma.attribution.create({
+            data: {
+              orderId: dbOrder.id,
+              customerId,
+              creatorId: lastTouchpoint.creatorId,
+              touchpointId: lastTouchpoint.id,
+              model: "LAST_TOUCH",
+              attributedRevenue: parseFloat(order.total_price),
+              attributionWeight: 1.0,
+              organizationId: orgId ?? null,
+            },
+          });
 
           // Mark customer as creator-acquired
           await this.prisma.customer.update({
@@ -154,7 +188,7 @@ export class ShopifyService {
           });
 
           this.logger.log(
-            `Attribution queued for order ${dbOrder.id} → creator ${lastTouchpoint.creatorId}`,
+            `Attribution created for order ${dbOrder.id} → creator ${lastTouchpoint.creatorId}`,
           );
         }
       }
